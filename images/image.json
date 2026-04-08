@@ -1,0 +1,44 @@
+[
+  {
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/redis-cluster:8.2.1-debian-12-r0",
+    "tag": "sealos.hub:5000/kube4/redis-cluster:8.2.1-debian-12-r0",
+    "tar": "redis-cluster-amd64.tar"
+  },
+  {
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/os-shell:12-debian-12-r51",
+    "tag": "sealos.hub:5000/kube4/os-shell:12-debian-12-r51",
+    "tar": "os-shell-amd64.tar"
+  },
+  {
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/redis-exporter:1.76.0-debian-12-r0",
+    "tag": "sealos.hub:5000/kube4/redis-exporter:1.76.0-debian-12-r0",
+    "tar": "redis-exporter-amd64.tar"
+  },
+  {
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/redis-cluster:8.2.1-debian-12-r0",
+    "tag": "sealos.hub:5000/kube4/redis-cluster:8.2.1-debian-12-r0",
+    "tar": "redis-cluster-arm64.tar"
+  },
+  {
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/os-shell:12-debian-12-r51",
+    "tag": "sealos.hub:5000/kube4/os-shell:12-debian-12-r51",
+    "tar": "os-shell-arm64.tar"
+  },
+  {
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "pull": "registry.cn-beijing.aliyuncs.com/kube4/redis-exporter:1.76.0-debian-12-r0",
+    "tag": "sealos.hub:5000/kube4/redis-exporter:1.76.0-debian-12-r0",
+    "tar": "redis-exporter-arm64.tar"
+  }
+]
