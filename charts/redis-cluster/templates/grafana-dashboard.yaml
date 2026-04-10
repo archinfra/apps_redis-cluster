@@ -1,0 +1,236 @@
+{{- if and .Values.metrics.enabled .Values.metrics.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "common.names.fullname" . }}-dashboard
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+    {{- if .Values.metrics.dashboards.labels }}
+    {{- include "common.tplvalues.render" ( dict "value" .Values.metrics.dashboards.labels "context" $ ) | nindent 4 }}
+    {{- end }}
+  {{- if .Values.metrics.dashboards.annotations }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" .Values.metrics.dashboards.annotations "context" $ ) | nindent 4 }}
+  {{- end }}
+data:
+  redis-overview.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "min(redis_up{service=\"{{ template \"common.names.fullname\" . }}-metrics\"})",
+              "refId": "A"
+            }
+          ],
+          "title": "Exporter Up",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(redis_connected_clients{service=\"{{ template \"common.names.fullname\" . }}-metrics\"})",
+              "refId": "A"
+            }
+          ],
+          "title": "Connected Clients",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(redis_memory_used_bytes{service=\"{{ template \"common.names.fullname\" . }}-metrics\"})",
+              "refId": "A"
+            }
+          ],
+          "title": "Memory Used",
+          "type": "stat",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "(sum(rate(redis_keyspace_hits_total{service=\"{{ template \"common.names.fullname\" . }}-metrics\"}[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total{service=\"{{ template \"common.names.fullname\" . }}-metrics\"}[5m])) + sum(rate(redis_keyspace_misses_total{service=\"{{ template \"common.names.fullname\" . }}-metrics\"}[5m])), 1)) * 100",
+              "refId": "A"
+            }
+          ],
+          "title": "Cache Hit Ratio",
+          "type": "stat",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(redis_commands_processed_total{service=\"{{ template \"common.names.fullname\" . }}-metrics\"}[5m]))",
+              "legendFormat": "commands/s",
+              "refId": "A"
+            }
+          ],
+          "title": "Command Throughput",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "sum(redis_memory_used_bytes{service=\"{{ template \"common.names.fullname\" . }}-metrics\"})",
+              "legendFormat": "used",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(redis_memory_max_bytes{service=\"{{ template \"common.names.fullname\" . }}-metrics\"})",
+              "legendFormat": "max",
+              "refId": "B"
+            }
+          ],
+          "title": "Memory Usage",
+          "type": "timeseries",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "archinfra",
+        "redis"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "title": "Redis Cluster Overview",
+      "version": 1
+    }
+{{- end }}

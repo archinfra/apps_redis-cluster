@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 APP_NAME="redis-cluster"
-APP_VERSION="0.1.3"
+APP_VERSION="0.1.4"
 PACKAGE_PROFILE="integrated"
 WORKDIR="/tmp/${APP_NAME}-installer"
 PAYLOAD_ARCHIVE="${WORKDIR}/payload.tar.gz"
@@ -23,6 +23,7 @@ STORAGE_SIZE="10Gi"
 RESOURCE_PROFILE="mid"
 ENABLE_METRICS="true"
 ENABLE_SERVICEMONITOR="true"
+ENABLE_PROMETHEUSRULE="true"
 SERVICE_MONITOR_NAMESPACE=""
 IMAGE_PULL_POLICY="IfNotPresent"
 WAIT_TIMEOUT="10m"
@@ -107,6 +108,8 @@ Monitoring:
   --disable-metrics                    Disable redis-exporter sidecar and metrics service
   --enable-servicemonitor              Create ServiceMonitor and auto-enable metrics
   --disable-servicemonitor             Disable ServiceMonitor
+  --enable-prometheusrule              Create PrometheusRule, default: ${ENABLE_PROMETHEUSRULE}
+  --disable-prometheusrule             Disable PrometheusRule
   --service-monitor-namespace <ns>     Optional namespace for the ServiceMonitor
 
 Image and rollout:
@@ -204,6 +207,14 @@ parse_args() {
         ;;
       --disable-servicemonitor)
         ENABLE_SERVICEMONITOR="false"
+        shift
+        ;;
+      --enable-prometheusrule)
+        ENABLE_PROMETHEUSRULE="true"
+        shift
+        ;;
+      --disable-prometheusrule)
+        ENABLE_PROMETHEUSRULE="false"
         shift
         ;;
       --service-monitor-namespace)
@@ -468,6 +479,17 @@ check_servicemonitor_support() {
   fi
 }
 
+check_prometheusrule_support() {
+  if [[ "${ENABLE_PROMETHEUSRULE}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
+    warn "PrometheusRule CRD not found; disabling PrometheusRule for this install"
+    ENABLE_PROMETHEUSRULE="false"
+  fi
+}
+
 preview_command() {
   local rendered=()
   local arg
@@ -588,6 +610,8 @@ install_release() {
     --set "metrics.enabled=${ENABLE_METRICS}"
     --set "metrics.serviceMonitor.enabled=${ENABLE_SERVICEMONITOR}"
     --set-string "metrics.serviceMonitor.labels.monitoring\\.archinfra\\.io/stack=default"
+    --set "metrics.prometheusRule.enabled=${ENABLE_PROMETHEUSRULE}"
+    --set-string "metrics.prometheusRule.additionalLabels.monitoring\\.archinfra\\.io/stack=default"
     --set-string "image.registry=$(image_registry_from_ref "${redis_image}")"
     --set-string "image.repository=$(image_repository_from_ref "${redis_image}")"
     --set-string "image.tag=$(image_tag_from_ref "${redis_image}")"
@@ -632,6 +656,12 @@ show_post_install_info() {
     echo
     kubectl get servicemonitor -n "${SERVICE_MONITOR_NAMESPACE:-${NAMESPACE}}" || true
   fi
+
+  if [[ "${ENABLE_PROMETHEUSRULE}" == "true" ]] && kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
+    echo
+    kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" >/dev/null 2>&1 && \
+      kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" || true
+  fi
 }
 
 uninstall_release() {
@@ -659,6 +689,11 @@ show_status() {
     echo
     kubectl get servicemonitor -A | grep "${RELEASE_NAME}" || true
   fi
+
+  if kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
+    echo
+    kubectl get prometheusrule -A | grep "${RELEASE_NAME}" || true
+  fi
 }
 
 main() {
@@ -676,6 +711,7 @@ main() {
       extract_payload
       load_image_metadata
       check_servicemonitor_support
+      check_prometheusrule_support
       prepare_images
       install_release
       show_post_install_info

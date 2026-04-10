@@ -162,16 +162,40 @@ Monitoring is enabled by default:
 
 - `metrics.enabled=true`
 - `metrics.serviceMonitor.enabled=true`
+- `metrics.prometheusRule.enabled=true`
 
 What gets created by default:
 
 - `redis-exporter` sidecar
 - metrics Service
 - `ServiceMonitor`
+- `PrometheusRule`
+- Grafana dashboard ConfigMap
 
 Default monitoring label:
 
 - `monitoring.archinfra.io/stack=default`
+
+Grafana auto-import contract:
+
+- dashboard ConfigMap label: `grafana_dashboard=1`
+- dashboard folder annotation: `grafana_folder=Middleware/Redis`
+
+Built-in alerts:
+
+- `RedisExporterDown`
+- `RedisMemoryUsageHigh`
+- `RedisRejectedConnectionsHigh`
+- `RedisCacheHitRatioLow`
+
+Built-in dashboard panels:
+
+- Exporter Up
+- Connected Clients
+- Memory Used
+- Cache Hit Ratio
+- Command Throughput
+- Memory Usage
 
 This means a Prometheus stack that selects by that label will discover Redis automatically after install.
 
@@ -180,6 +204,12 @@ If the cluster does not have the `ServiceMonitor` CRD:
 - exporter remains enabled
 - `ServiceMonitor` creation is automatically disabled
 - Redis install does not fail just because monitoring CRDs are missing
+
+If the cluster does not have the `PrometheusRule` CRD:
+
+- Redis exporter and `ServiceMonitor` still work
+- `PrometheusRule` creation is automatically disabled
+- Redis install does not fail just because alerting CRDs are missing
 
 ## Dependency And Integration View
 
