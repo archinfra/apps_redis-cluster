@@ -1,195 +1,199 @@
 # app_redis-cluster
 
-Redis Cluster 离线交付仓库。
+Redis Cluster offline delivery repository.
 
-这个仓库不是只放一个 Redis Helm chart，而是把下面几件事一起打包成了 `.run` 安装器：
+This repository is not just a Helm chart wrapper. It packages chart, images, monitoring integration, and offline delivery into a single `.run` installer so that a new maintainer, or a general-purpose AI with no background context, can still deploy and verify Redis Cluster end to end.
 
-- 镜像准备
-- Helm 安装
-- 监控接入
-- 多架构离线交付
+## What This Installer Does
 
-整体范式和 MySQL、MinIO、Milvus、RabbitMQ、MongoDB 保持一致，目标是让一个没有背景信息的新接手同学，或者一个普通 AI，也能按 README 独立完成安装和验证。
-
-## 这套安装器是怎么设计的
-
-普通使用者可以把它理解成一个“Redis Cluster 离线安装器”，核心只有 4 个动作：
+The installer provides four actions:
 
 - `install`
 - `status`
 - `uninstall`
 - `help`
 
-其中 `install` 会自动完成：
+During `install`, it will:
 
-1. 解包 `.run` 里的 chart、镜像元数据和镜像 tar
-2. 按目标仓库地址准备 Redis、exporter、辅助镜像
-3. 检查集群里是否支持 `ServiceMonitor`
-4. 生成最终 Helm 参数
-5. 执行 `helm upgrade --install`
-6. 输出 Pod、Service、PVC、ServiceMonitor 状态
+1. Extract the embedded chart and image metadata from the `.run` package.
+2. Load, retag, and push required images to the target internal registry unless `--skip-image-prepare` is used.
+3. Detect whether the cluster supports `ServiceMonitor`.
+4. Render the final Helm arguments, including images, storage, monitoring, and resource profile.
+5. Run `helm upgrade --install`.
+6. Print the resulting Pods, Services, PVCs, and ServiceMonitor state.
 
-也就是说，使用者一般不需要手动做：
+That means users normally do not need to manually run:
 
 - `docker load`
 - `docker tag`
 - `docker push`
 - `helm dependency build`
-- `kubectl apply ServiceMonitor`
+- `kubectl apply` for monitoring objects
 
-## 默认部署契约
+## Quick Start
 
-默认参数如下：
-
-- namespace: `aict`
-- release name: `redis-cluster`
-- total nodes: `6`
-- replicas per master: `1`
-- 默认拓扑：`3 master + 3 replica`
-- Redis password: `Redis@Passw0rd`
-- storage class: `nfs`
-- storage size: `10Gi`
-- metrics: `true`
-- ServiceMonitor: `true`
-- wait timeout: `10m`
-- target image repo: `sealos.hub:5000/kube4`
-
-这是一套“标准 6 节点 Redis Cluster + 默认开启监控”的交付方案。
-
-## 默认拓扑
-
-默认安装：
+Install with defaults:
 
 ```bash
 ./redis-cluster-installer-amd64.run install -y
 ```
 
-会部署：
+Install with the recommended default profile for ordinary production-style traffic:
 
-- 1 个 Redis Cluster StatefulSet
-- 共 `6` 个 Redis Pod
-- 默认形成 `3 主 3 从`
-- 1 个 headless Service：`redis-cluster-headless`
-- 1 个集群访问 Service：`redis-cluster`
-- 1 个 metrics Service：`redis-cluster-metrics`
-- 6 个 PVC
-- 1 个 `ServiceMonitor`
-
-默认不会部署：
-
-- 外部 LoadBalancer
-- 额外的业务 sidecar
-
-## 默认访问地址、端口和密码
-
-### 集群内访问
-
-默认 Service 契约：
-
-- 集群入口：`redis-cluster.aict.svc.cluster.local:6379`
-- headless Service：`redis-cluster-headless.aict.svc.cluster.local`
-- Redis Cluster bus port：`16379`
-- metrics Service：`redis-cluster-metrics.aict.svc.cluster.local:9121`
-
-通常业务系统或测试客户端直接使用：
-
-```text
-redis-cluster.aict.svc.cluster.local:6379
+```bash
+./redis-cluster-installer-amd64.run install \
+  --resource-profile mid \
+  --storage-class nfs \
+  -y
 ```
 
-然后配合 cluster 模式连接。
+Install for a small demo environment:
 
-### 默认密码
+```bash
+./redis-cluster-installer-amd64.run install \
+  --resource-profile low \
+  -y
+```
 
-默认 Redis 密码：
+Install for a heavier traffic scenario:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --resource-profile high \
+  --storage-class nfs \
+  -y
+```
+
+Pass through raw Helm arguments for advanced customization:
+
+```bash
+./redis-cluster-installer-amd64.run install -y -- \
+  --set redis.extraEnvVars[0].name=TZ \
+  --set redis.extraEnvVars[0].value=Asia/Shanghai
+```
+
+## Default Deployment Contract
+
+Default installer values:
+
+- namespace: `aict`
+- release name: `redis-cluster`
+- total nodes: `6`
+- replicas per master: `1`
+- resulting topology: `3 master + 3 replica`
+- password: `Redis@Passw0rd`
+- storage class: `nfs`
+- storage size: `10Gi`
+- metrics: `true`
+- ServiceMonitor: `true`
+- resource profile: `mid`
+- wait timeout: `10m`
+- target registry repo: `sealos.hub:5000/kube4`
+
+The default `mid` profile is the baseline profile for a normal shared environment and is intended as the starting point for roughly `500-1000` concurrent requests and around `10000` active users. It is still a baseline, not a strict capacity guarantee. If workload shape is cache-heavy, key size is large, or write amplification is high, raise resources and possibly increase cluster size.
+
+The installer also accepts `midd` as an alias of `mid` to match historical wording.
+
+## Default Access, Endpoints, And Credentials
+
+Internal Service endpoints:
+
+- cluster entry: `redis-cluster.aict.svc.cluster.local:6379`
+- headless service: `redis-cluster-headless.aict.svc.cluster.local`
+- cluster bus port: `16379`
+- metrics service: `redis-cluster-metrics.aict.svc.cluster.local:9121`
+
+Default password:
 
 - `Redis@Passw0rd`
 
-生产环境建议在首次安装时显式改掉，不要长期沿用仓库默认值。
-
-### 典型连接方式
-
-集群内客户端示例：
+Typical in-cluster client example:
 
 ```bash
 redis-cli -c -h redis-cluster.aict.svc.cluster.local -p 6379 -a 'Redis@Passw0rd'
 ```
 
-## 默认资源需求
+Production recommendation:
 
-当前 chart 的资源主要依赖 Bitnami `resourcesPreset`：
+- always override the default password during first install
+- keep the service internal unless there is a clear external access design
 
-- Redis 主容器：`nano`
-- exporter：`nano`
-- volumePermissions init 容器：`nano`
+## Resource Profiles
 
-Bitnami `nano` 预设大致是：
+Three resource profiles are built in:
 
-- request: `100m CPU / 128Mi memory / 50Mi ephemeral-storage`
-- limit: `150m CPU / 192Mi memory / 2Gi ephemeral-storage`
+- `low`: demo, development, or functional validation
+- `mid`: normal shared environment, default profile, baseline for `500-1000` concurrency and `~10000` users
+- `high`: higher concurrency or larger working set
 
-### 单个 Redis Pod
+The profile mainly controls:
 
-默认监控开启时，每个 Pod 大致会有：
+- Redis main container requests and limits
+- `redis-exporter` sidecar requests and limits
+- init/helper containers such as `volumePermissions`, `sysctlImage`, and `updateJob`
 
-- Redis 主容器：`100m / 128Mi`
-- exporter：`100m / 128Mi`
+### Per-Component Resource Matrix
 
-所以单 Pod 持续资源大致是：
+| Profile | Scenario | Redis request | Redis limit | Exporter request | Exporter limit | Helper init/request | Helper init/limit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `low` | demo or test | `200m / 256Mi` | `500m / 512Mi` | `50m / 64Mi` | `100m / 128Mi` | `20-30m / 32-64Mi` | `50-100m / 64-128Mi` |
+| `mid` | normal shared environment | `500m / 1Gi` | `1 / 2Gi` | `100m / 128Mi` | `200m / 256Mi` | `30-50m / 64Mi` | `100-200m / 128Mi` |
+| `high` | higher concurrency | `1 / 2Gi` | `2 / 4Gi` | `200m / 256Mi` | `500m / 512Mi` | `50-100m / 128Mi` | `200-300m / 256Mi` |
 
-- request: `200m CPU / 256Mi memory`
-- limit: `300m CPU / 384Mi memory`
+### Default Total Steady-State Demand
 
-### 默认 6 节点总资源
+The table below assumes the default topology of `6` Redis Pods and metrics enabled:
 
-| 项目 | 单 Pod | 6 节点合计 |
-| --- | --- | --- |
-| CPU request | `200m` | `1200m` |
-| Memory request | `256Mi` | `1536Mi` |
-| CPU limit | `300m` | `1800m` |
-| Memory limit | `384Mi` | `2304Mi` |
+| Profile | Total CPU request | Total memory request | Total CPU limit | Total memory limit | Storage |
+| --- | --- | --- | --- | --- | --- |
+| `low` | about `1.5 CPU` | about `1.875 GiB` | about `3.6 CPU` | about `3.75 GiB` | `60Gi` |
+| `mid` | about `3.6 CPU` | about `6.75 GiB` | about `7.2 CPU` | about `13.5 GiB` | `60Gi` |
+| `high` | about `7.2 CPU` | about `13.5 GiB` | about `15 CPU` | about `27 GiB` | `60Gi` |
 
-### 存储需求
+Notes:
 
-默认每个节点：
+- totals above describe steady-state Redis Pods plus exporter sidecars
+- init containers and update jobs add short-lived overhead during rollout
+- if you increase node count, total demand scales almost linearly
 
-- `10Gi`
+## Monitoring Design
 
-默认总存储需求：
-
-- `60Gi`
-
-如果后面你把总节点数调高，存储需求也应该按节点数线性上升。
-
-## 监控设计
-
-Redis 的监控默认就是开启的：
+Monitoring is enabled by default:
 
 - `metrics.enabled=true`
 - `metrics.serviceMonitor.enabled=true`
 
-默认监控对象：
+What gets created by default:
 
-- redis-exporter sidecar
-- metrics Service：`redis-cluster-metrics`
+- `redis-exporter` sidecar
+- metrics Service
 - `ServiceMonitor`
 
-默认会自动带平台统一标签：
+Default monitoring label:
 
 - `monitoring.archinfra.io/stack=default`
 
-如果集群里没有 `ServiceMonitor` CRD，安装器会自动降级：
+This means a Prometheus stack that selects by that label will discover Redis automatically after install.
 
-- 保留 exporter
-- 不创建 `ServiceMonitor`
+If the cluster does not have the `ServiceMonitor` CRD:
 
-不会因为监控 CRD 缺失而导致整个 Redis Cluster 安装失败。
+- exporter remains enabled
+- `ServiceMonitor` creation is automatically disabled
+- Redis install does not fail just because monitoring CRDs are missing
 
-## 和其他组件的依赖关系
+## Dependency And Integration View
 
-### Redis 不依赖谁
+### What Redis Depends On
 
-Redis Cluster 默认不依赖这些组件启动：
+Redis Cluster requires:
+
+- a working Kubernetes cluster
+- `kubectl`
+- `helm`
+- `docker` unless `--skip-image-prepare` is used
+- a usable StorageClass, typically `nfs`
+
+Redis does not require these components to start:
 
 - MySQL
 - Nacos
@@ -198,40 +202,62 @@ Redis Cluster 默认不依赖这些组件启动：
 - MongoDB
 - Milvus
 
-### 谁常常会消费 Redis
+### What Usually Depends On Redis
 
-在系统集成场景里，Redis 常常被这些系统作为缓存、会话或配置加速组件消费：
+In integrated business systems, Redis is usually consumed by:
 
-- 业务 API 服务
-- AI 应用服务
-- 通过 `cmict-share.yaml` 导入到 Nacos 的下游业务配置
+- business API services
+- web backends
+- AI application services
+- session, cache, token, or rate-limit components
 
-也就是说，Redis 更多是“被连接使用”，而不是“启动时依赖别人”。
+Redis is usually a downstream shared capability, not a startup dependency for the other middleware packages.
 
-### 和 Prometheus 的关系
+### Relationship With Prometheus
 
-如果你的 Prometheus Stack 按我们统一规则做了按标签发现，那么 Redis 安装后会自动接入，因为默认 `ServiceMonitor` 已经带了：
+If your Prometheus stack follows the shared label contract, Redis auto-registers into monitoring through:
 
-- `monitoring.archinfra.io/stack=default`
+- `ServiceMonitor`
+- label `monitoring.archinfra.io/stack=default`
 
-## 常见使用场景
+## Common Installation Scenarios
 
-### 场景 1：按默认参数安装
+### 1. Default install
 
 ```bash
 ./redis-cluster-installer-amd64.run install -y
 ```
 
-### 场景 2：显式指定密码和存储类
+### 2. Demo or development install
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
+  --resource-profile low \
+  -y
+```
+
+### 3. Normal shared environment
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --resource-profile mid \
   --storage-class nfs \
   --password 'StrongRedis@2026' \
   -y
 ```
 
-### 场景 3：关闭监控
+### 4. Higher concurrency environment
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --resource-profile high \
+  --nodes 6 \
+  --replicas 1 \
+  --storage-class nfs \
+  -y
+```
+
+### 5. Disable monitoring
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
@@ -240,7 +266,7 @@ Redis Cluster 默认不依赖这些组件启动：
   -y
 ```
 
-### 场景 4：目标仓库已有镜像
+### 6. Images already exist in the target registry
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
@@ -249,91 +275,153 @@ Redis Cluster 默认不依赖这些组件启动：
   -y
 ```
 
-### 场景 5：透传 Helm 参数
-
-如果安装器没有显式暴露某个 Helm 参数，可以通过 `--` 透传：
+### 7. Pass through unsupported Helm arguments
 
 ```bash
 ./redis-cluster-installer-amd64.run install -y -- \
-  --set cluster.externalAccess.enabled=true \
-  --set cluster.externalAccess.service.type=LoadBalancer
+  --set cluster.externalAccess.enabled=true
 ```
 
-## 给 AI 或自动化系统的执行规则
+## Installer Help Summary
 
-如果后续把安装包放到服务器上，希望 AI 参考文档自动部署 Redis，这些规则建议直接写给它。
+Main parameters:
 
-### 默认优先策略
+- `--namespace`
+- `--release-name`
+- `--nodes`
+- `--replicas`
+- `--password`
+- `--storage-class`
+- `--storage-size`
+- `--resource-profile`
+- `--enable-metrics`
+- `--disable-metrics`
+- `--enable-servicemonitor`
+- `--disable-servicemonitor`
+- `--service-monitor-namespace`
+- `--registry`
+- `--registry-user`
+- `--registry-password`
+- `--image-pull-policy`
+- `--skip-image-prepare`
+- `--wait-timeout`
+- `--delete-pvc`
+- `--`
 
-如果没有额外约束，优先使用：
+The trailing `--` is the escape hatch for advanced Helm tuning when the installer does not expose a specific chart option.
 
-- `namespace=aict`
-- `nodes=6`
-- `replicas=1`
-- 显式传入密码
-- 开启 metrics
-- 开启 `ServiceMonitor`
+## Post-Install Verification
 
-### 成功标准
-
-可以把这些作为成功信号：
-
-- `6` 个 Redis Pod 全部 `Running`
-- `redis-cluster` Service 存在
-- `redis-cluster-headless` Service 存在
-- `redis-cluster-metrics` Service 存在
-- PVC 全部绑定成功
-- 如果集群支持 `ServiceMonitor`，则 `redis-cluster` 对应的 `ServiceMonitor` 存在
-
-### 失败信号
-
-- Pod 长时间 `Pending`
-- Redis Pod `CrashLoopBackOff`
-- PVC 未绑定
-- Cluster 初始化未完成
-- exporter 存在但 metrics Service 不通
-
-## 常见排障命令
+Check release status:
 
 ```bash
 ./redis-cluster-installer-amd64.run status -n aict
-kubectl get pods,svc,pvc -n aict
-kubectl get servicemonitor -A | grep redis-cluster
-kubectl logs -n aict redis-cluster-0 --tail=200
 ```
 
-验证集群连接：
+Check Pods:
 
 ```bash
-kubectl run --namespace aict redis-cluster-client --rm --tty -i --restart='Never' \
-  --env REDIS_PASSWORD='Redis@Passw0rd' \
-  --image sealos.hub:5000/kube4/redis-cluster:8.2.3-debian-12-r0 -- bash
-
-redis-cli -c -h redis-cluster -a "$REDIS_PASSWORD"
+kubectl get pods -n aict -l app.kubernetes.io/instance=redis-cluster
 ```
 
-## 仓库结构
+Check Services:
 
-- `build.sh`
-  构建多架构 `.run` 安装包
-- `install.sh`
-  安装器入口，负责解包、镜像准备、Helm 安装和状态输出
-- `images/image.json`
-  按架构定义镜像来源和目标内网镜像
-- `charts/redis-cluster`
-  vendored Redis Cluster Helm chart
-- `.github/workflows/build-offline-installer.yml`
-  GitHub Actions 构建和 release 发布流程
+```bash
+kubectl get svc -n aict -l app.kubernetes.io/instance=redis-cluster
+```
 
-## 构建与发布
+Check monitoring objects:
 
-本地构建需要：
+```bash
+kubectl get servicemonitor -n aict
+```
 
-- `bash`
-- `docker`
-- `jq`
+Quick connectivity test:
 
-示例：
+```bash
+kubectl exec -it -n aict redis-cluster-0 -- redis-cli -a 'Redis@Passw0rd' cluster info
+```
+
+Success signals:
+
+- all Redis Pods become `Running`
+- cluster state reports `ok`
+- PVCs are bound
+- `ServiceMonitor` exists when the CRD is installed
+
+## Uninstall
+
+Uninstall release only:
+
+```bash
+./redis-cluster-installer-amd64.run uninstall -y
+```
+
+Uninstall and delete PVCs:
+
+```bash
+./redis-cluster-installer-amd64.run uninstall --delete-pvc -y
+```
+
+## Troubleshooting
+
+### Pods stay Pending
+
+Check:
+
+- whether the cluster has enough CPU and memory for the selected profile
+- whether the requested `StorageClass` exists
+- whether PVCs are bound successfully
+
+### ServiceMonitor not created
+
+Check:
+
+- whether `servicemonitors.monitoring.coreos.com` CRD exists
+- whether `--disable-servicemonitor` was passed
+
+### Images fail to pull
+
+Check:
+
+- whether the target internal registry is reachable
+- whether `--registry` points to the correct repo prefix
+- whether `--skip-image-prepare` was used only after images were already present
+
+### Cluster is up but capacity is insufficient
+
+Actions:
+
+- raise `--resource-profile` from `low` to `mid` or `high`
+- increase `--nodes`
+- adjust advanced chart parameters through `--`
+
+## Guidance For AI Or Automated Operators
+
+If an AI agent is using this installer without human context, it should assume:
+
+- `mid` is the safe default profile
+- `low` is only for demo or lightweight testing
+- `high` should be used when the cluster already has enough spare resources
+- if the target registry already contains images, prefer `--skip-image-prepare`
+
+Before installation, the AI should verify:
+
+- current kube context is correct
+- target namespace is intended
+- the chosen `StorageClass` exists
+- the cluster has enough allocatable CPU and memory for the selected profile
+
+If installation fails, the AI should inspect:
+
+- `kubectl get pods -n <namespace>`
+- `kubectl describe pod <pod> -n <namespace>`
+- `kubectl get pvc -n <namespace>`
+- `kubectl get events -n <namespace> --sort-by=.lastTimestamp`
+
+## Build And Release
+
+Build architecture-specific offline packages:
 
 ```bash
 ./build.sh --arch amd64
@@ -341,7 +429,4 @@ redis-cli -c -h redis-cluster -a "$REDIS_PASSWORD"
 ./build.sh --arch all
 ```
 
-GitHub Actions 负责：
-
-- `main/master` 多架构构建
-- `v*` tag 发布 release
+The GitHub Actions workflow builds multi-arch release packages on `main` and on tags.

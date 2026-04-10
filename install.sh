@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 APP_NAME="redis-cluster"
-APP_VERSION="0.1.2"
+APP_VERSION="0.1.3"
 PACKAGE_PROFILE="integrated"
 WORKDIR="/tmp/${APP_NAME}-installer"
 PAYLOAD_ARCHIVE="${WORKDIR}/payload.tar.gz"
@@ -20,6 +20,7 @@ REPLICAS="1"
 REDIS_PASSWORD="Redis@Passw0rd"
 STORAGE_CLASS="nfs"
 STORAGE_SIZE="10Gi"
+RESOURCE_PROFILE="mid"
 ENABLE_METRICS="true"
 ENABLE_SERVICEMONITOR="true"
 SERVICE_MONITOR_NAMESPACE=""
@@ -99,6 +100,7 @@ Core options:
   --password <pwd>                     Redis password, default: ${REDIS_PASSWORD}
   --storage-class <name>               StorageClass, default: ${STORAGE_CLASS}
   --storage-size <size>                PVC size, default: ${STORAGE_SIZE}
+  --resource-profile <name>            Resource profile: low|mid|midd|high, default: ${RESOURCE_PROFILE}
 
 Monitoring:
   --enable-metrics                     Enable redis-exporter sidecar and metrics service
@@ -122,6 +124,7 @@ Other:
 
 Examples:
   ${cmd} install --storage-class nfs --password 'Redis@123' -y
+  ${cmd} install --resource-profile high --storage-class nfs -y
   ${cmd} install --enable-metrics --enable-servicemonitor --storage-class nfs -y
   ${cmd} install --registry harbor.example.com/kube4 --skip-image-prepare -y
   ${cmd} status -n aict
@@ -180,6 +183,11 @@ parse_args() {
       --storage-size)
         [[ $# -ge 2 ]] || die "Missing value for $1"
         STORAGE_SIZE="$2"
+        shift 2
+        ;;
+      --resource-profile)
+        [[ $# -ge 2 ]] || die "Missing value for $1"
+        RESOURCE_PROFILE="$2"
         shift 2
         ;;
       --enable-metrics)
@@ -271,6 +279,21 @@ normalize_flags() {
   if [[ "${ENABLE_SERVICEMONITOR}" == "true" ]]; then
     ENABLE_METRICS="true"
   fi
+
+  case "${RESOURCE_PROFILE,,}" in
+    low)
+      RESOURCE_PROFILE="low"
+      ;;
+    mid|midd|middle|medium)
+      RESOURCE_PROFILE="mid"
+      ;;
+    high)
+      RESOURCE_PROFILE="high"
+      ;;
+    *)
+      die "Unsupported resource profile: ${RESOURCE_PROFILE}. Expected low|mid|midd|high"
+      ;;
+  esac
 }
 
 check_deps() {
@@ -293,6 +316,7 @@ confirm() {
     echo "Replicas per master     : ${REPLICAS}"
     echo "StorageClass            : ${STORAGE_CLASS}"
     echo "Storage size            : ${STORAGE_SIZE}"
+    echo "Resource profile        : ${RESOURCE_PROFILE}"
     echo "Metrics                 : ${ENABLE_METRICS}"
     echo "ServiceMonitor          : ${ENABLE_SERVICEMONITOR}"
     echo "Registry repo           : ${REGISTRY_REPO}"
@@ -454,11 +478,97 @@ preview_command() {
   echo
 }
 
+build_resource_profile_args() {
+  RESOURCE_HELM_ARGS=(
+    --set "redis.resourcesPreset=none"
+    --set "metrics.resourcesPreset=none"
+    --set "volumePermissions.resourcesPreset=none"
+    --set "sysctlImage.resourcesPreset=none"
+    --set "updateJob.resourcesPreset=none"
+  )
+
+  case "${RESOURCE_PROFILE}" in
+    low)
+      RESOURCE_HELM_ARGS+=(
+        --set-string "redis.resources.requests.cpu=200m"
+        --set-string "redis.resources.requests.memory=256Mi"
+        --set-string "redis.resources.limits.cpu=500m"
+        --set-string "redis.resources.limits.memory=512Mi"
+        --set-string "metrics.resources.requests.cpu=50m"
+        --set-string "metrics.resources.requests.memory=64Mi"
+        --set-string "metrics.resources.limits.cpu=100m"
+        --set-string "metrics.resources.limits.memory=128Mi"
+        --set-string "volumePermissions.resources.requests.cpu=20m"
+        --set-string "volumePermissions.resources.requests.memory=32Mi"
+        --set-string "volumePermissions.resources.limits.cpu=50m"
+        --set-string "volumePermissions.resources.limits.memory=64Mi"
+        --set-string "sysctlImage.resources.requests.cpu=20m"
+        --set-string "sysctlImage.resources.requests.memory=32Mi"
+        --set-string "sysctlImage.resources.limits.cpu=50m"
+        --set-string "sysctlImage.resources.limits.memory=64Mi"
+        --set-string "updateJob.resources.requests.cpu=30m"
+        --set-string "updateJob.resources.requests.memory=64Mi"
+        --set-string "updateJob.resources.limits.cpu=100m"
+        --set-string "updateJob.resources.limits.memory=128Mi"
+      )
+      ;;
+    mid)
+      RESOURCE_HELM_ARGS+=(
+        --set-string "redis.resources.requests.cpu=500m"
+        --set-string "redis.resources.requests.memory=1Gi"
+        --set-string "redis.resources.limits.cpu=1"
+        --set-string "redis.resources.limits.memory=2Gi"
+        --set-string "metrics.resources.requests.cpu=100m"
+        --set-string "metrics.resources.requests.memory=128Mi"
+        --set-string "metrics.resources.limits.cpu=200m"
+        --set-string "metrics.resources.limits.memory=256Mi"
+        --set-string "volumePermissions.resources.requests.cpu=30m"
+        --set-string "volumePermissions.resources.requests.memory=64Mi"
+        --set-string "volumePermissions.resources.limits.cpu=100m"
+        --set-string "volumePermissions.resources.limits.memory=128Mi"
+        --set-string "sysctlImage.resources.requests.cpu=30m"
+        --set-string "sysctlImage.resources.requests.memory=64Mi"
+        --set-string "sysctlImage.resources.limits.cpu=100m"
+        --set-string "sysctlImage.resources.limits.memory=128Mi"
+        --set-string "updateJob.resources.requests.cpu=50m"
+        --set-string "updateJob.resources.requests.memory=64Mi"
+        --set-string "updateJob.resources.limits.cpu=200m"
+        --set-string "updateJob.resources.limits.memory=128Mi"
+      )
+      ;;
+    high)
+      RESOURCE_HELM_ARGS+=(
+        --set-string "redis.resources.requests.cpu=1"
+        --set-string "redis.resources.requests.memory=2Gi"
+        --set-string "redis.resources.limits.cpu=2"
+        --set-string "redis.resources.limits.memory=4Gi"
+        --set-string "metrics.resources.requests.cpu=200m"
+        --set-string "metrics.resources.requests.memory=256Mi"
+        --set-string "metrics.resources.limits.cpu=500m"
+        --set-string "metrics.resources.limits.memory=512Mi"
+        --set-string "volumePermissions.resources.requests.cpu=50m"
+        --set-string "volumePermissions.resources.requests.memory=128Mi"
+        --set-string "volumePermissions.resources.limits.cpu=200m"
+        --set-string "volumePermissions.resources.limits.memory=256Mi"
+        --set-string "sysctlImage.resources.requests.cpu=50m"
+        --set-string "sysctlImage.resources.requests.memory=128Mi"
+        --set-string "sysctlImage.resources.limits.cpu=200m"
+        --set-string "sysctlImage.resources.limits.memory=256Mi"
+        --set-string "updateJob.resources.requests.cpu=100m"
+        --set-string "updateJob.resources.requests.memory=128Mi"
+        --set-string "updateJob.resources.limits.cpu=300m"
+        --set-string "updateJob.resources.limits.memory=256Mi"
+      )
+      ;;
+  esac
+}
+
 install_release() {
   local redis_image exporter_image os_shell_image
   redis_image="$(find_image_ref_by_name "redis-cluster")" || die "Unable to resolve redis-cluster image"
   exporter_image="$(find_image_ref_by_name "redis-exporter")" || die "Unable to resolve redis-exporter image"
   os_shell_image="$(find_image_ref_by_name "os-shell")" || die "Unable to resolve os-shell image"
+  build_resource_profile_args
 
   local helm_cmd=(
     helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"
@@ -495,6 +605,8 @@ install_release() {
     --set-string "metrics.image.tag=$(image_tag_from_ref "${exporter_image}")"
     --set-string "metrics.image.pullPolicy=${IMAGE_PULL_POLICY}"
   )
+
+  helm_cmd+=("${RESOURCE_HELM_ARGS[@]}")
 
   if [[ -n "${SERVICE_MONITOR_NAMESPACE}" && "${ENABLE_SERVICEMONITOR}" == "true" ]]; then
     helm_cmd+=(--set-string "metrics.serviceMonitor.namespace=${SERVICE_MONITOR_NAMESPACE}")
