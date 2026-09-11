@@ -16,6 +16,14 @@ spec:
           annotations:
             summary: Redis instance unavailable
 
+        - alert: RedisClusterSlotsMissing
+          expr: redis_cluster_slots_assigned < 16384
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Redis cluster slots incomplete
+
         - alert: RedisClusterMemoryHigh
           expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
           for: 10m
