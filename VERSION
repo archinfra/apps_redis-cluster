@@ -1,0 +1,13 @@
+component: redis-cluster
+
+redis:
+  version: 8.2.7
+
+chart:
+  version: 13.0.5
+
+redisExporter:
+  version: 1.76.0
+
+maintainer: archinfra
+profile: production
