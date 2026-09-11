@@ -4,6 +4,7 @@ metadata:
   name: redis-cluster-alerts
   labels:
     app.kubernetes.io/name: redis-cluster
+    monitoring.archinfra.io/stack: default
 spec:
   groups:
     - name: redis-cluster.rules
@@ -13,14 +14,43 @@ spec:
           for: 5m
           labels:
             severity: critical
+            category: availability
           annotations:
             summary: Redis instance unavailable
+
+        - alert: RedisClusterStateNotOk
+          expr: redis_cluster_state != 1
+          for: 5m
+          labels:
+            severity: critical
+            category: cluster
+          annotations:
+            summary: Redis cluster state is not ok
+
+        - alert: RedisMasterLinkDown
+          expr: redis_master_link_status == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: cluster
+          annotations:
+            summary: Redis replica lost connection to its master
+
+        - alert: RedisClusterSlotFail
+          expr: redis_cluster_slots_fail > 0
+          for: 5m
+          labels:
+            severity: critical
+            category: cluster
+          annotations:
+            summary: Redis cluster has failing slots
 
         - alert: RedisClusterSlotsMissing
           expr: redis_cluster_slots_assigned < 16384
           for: 5m
           labels:
             severity: critical
+            category: cluster
           annotations:
             summary: Redis cluster slots incomplete
 
@@ -29,13 +59,42 @@ spec:
           for: 10m
           labels:
             severity: warning
+            category: capacity
           annotations:
             summary: Redis memory usage is above 85%
+
+        - alert: RedisKeyEviction
+          expr: increase(redis_evicted_keys_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            category: capacity
+          annotations:
+            summary: Redis is evicting keys
+
+        - alert: RedisRdbLastBgsaveFailed
+          expr: redis_rdb_last_bgsave_status == 0
+          for: 15m
+          labels:
+            severity: warning
+            category: persistence
+          annotations:
+            summary: Redis RDB last background save failed
+
+        - alert: RedisConnectionSaturation
+          expr: redis_connected_clients / redis_maxclients > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            category: saturation
+          annotations:
+            summary: Redis is approaching its max client connections
 
         - alert: RedisRejectedConnections
           expr: increase(redis_rejected_connections_total[5m]) > 0
           for: 5m
           labels:
             severity: warning
+            category: saturation
           annotations:
             summary: Redis is rejecting client connections

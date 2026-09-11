@@ -1162,6 +1162,64 @@ metrics:
         annotations:
           summary: Redis cache hit ratio is low
           description: Redis release {{ template "common.names.fullname" . }} has sustained a cache hit ratio below 80% for 15 minutes.
+      - alert: RedisClusterStateNotOk
+        expr: max(redis_cluster_state{service="{{ template "common.names.fullname" . }}-metrics"}) != 1
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: Redis cluster state is not ok
+          description: Redis release {{ template "common.names.fullname" . }} cluster state is not OK (nodes or slots are failing).
+      - alert: RedisMasterLinkDown
+        expr: max(redis_master_link_status{service="{{ template "common.names.fullname" . }}-metrics"}) == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: Redis replica lost connection to its master
+          description: A Redis replica of release {{ template "common.names.fullname" . }} has lost its connection to the master for more than 5 minutes.
+      - alert: RedisClusterSlotFail
+        expr: max(redis_cluster_slots_fail{service="{{ template "common.names.fullname" . }}-metrics"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: Redis cluster has failing slots
+          description: Redis release {{ template "common.names.fullname" . }} has one or more cluster slots in fail state.
+      - alert: RedisConnectionSaturation
+        expr: |
+          max(redis_connected_clients{service="{{ template "common.names.fullname" . }}-metrics"})
+          /
+          clamp_min(max(redis_maxclients{service="{{ template "common.names.fullname" . }}-metrics"}), 1)
+          > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          category: saturation
+        annotations:
+          summary: Redis is approaching its max client connections
+          description: Redis release {{ template "common.names.fullname" . }} is using more than 90% of its configured max clients.
+      - alert: RedisRdbLastBgsaveFailed
+        expr: max(redis_rdb_last_bgsave_status{service="{{ template "common.names.fullname" . }}-metrics"}) == 0
+        for: 15m
+        labels:
+          severity: warning
+          category: persistence
+        annotations:
+          summary: Redis RDB last background save failed
+          description: The last background RDB save for release {{ template "common.names.fullname" . }} failed.
+      - alert: RedisKeyEviction
+        expr: increase(redis_evicted_keys_total{service="{{ template "common.names.fullname" . }}-metrics"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          category: capacity
+        annotations:
+          summary: Redis is evicting keys
+          description: Redis release {{ template "common.names.fullname" . }} has evicted keys in the last 5 minutes, indicating memory pressure.
   dashboards:
     enabled: true
     labels:
@@ -1169,15 +1227,6 @@ metrics:
       monitoring.archinfra.io/stack: default
     annotations:
       grafana_folder: Middleware/Redis
-    ##  - alert: RedisKeyEviction
-    ##    expr: increase(redis_evicted_keys_total{service="{{ template "common.names.fullname" . }}-metrics"}[5m]) > 0
-    ##    for: 1s
-    ##    labels:
-    ##      severity: error
-    ##    annotations:
-    ##      summary: Redis&reg; instance {{ "{{ $instance }}" }} has evicted keys
-    ##      description: Redis&reg; instance {{ "{{ $instance }}" }} has evicted {{ "{{ $value }}" }} keys in the last 5 minutes.
-    ##
     rules: []
   ## @param metrics.priorityClassName Metrics exporter pod priorityClassName
   ##
