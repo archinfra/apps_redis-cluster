@@ -1,0 +1,22 @@
+name: Helm Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  helm-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint charts/redis-cluster
+
+      - name: Helm template render
+        run: helm template redis-cluster charts/redis-cluster > /tmp/render.yaml
