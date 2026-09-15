@@ -37,6 +37,12 @@ jobs:
       - name: Helm lint
         run: helm lint charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml
 
+      - name: Validate base chart render
+        run: |
+          helm template redis-cluster-base charts/redis-cluster > /tmp/render-base.yaml
+          grep -q 'maxmemory 1536mb' /tmp/render-base.yaml
+          grep -q 'cluster-node-timeout 15000' /tmp/render-base.yaml
+
       - name: Helm template render
         run: helm template redis-cluster charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml > /tmp/render.yaml
 
@@ -55,6 +61,8 @@ jobs:
           grep -q 'RedisExporterDown' /tmp/render.yaml
           grep -q 'RedisDown' /tmp/render.yaml
           grep -q 'RedisClusterStateNotOk' /tmp/render.yaml
+          grep -q 'RedisAOFWriteFailed' /tmp/render.yaml
+          grep -q 'RedisCPUUsageHigh' /tmp/render.yaml
           grep -q 'RedisPVCUsageCritical' /tmp/render.yaml
           grep -q 'RedisPodOOMKilled' /tmp/render.yaml
           grep -q 'redis-overview.json' /tmp/render.yaml
