@@ -1,16 +1,18 @@
+# Copyright Broadcom, Inc. All Rights Reserved.
+# SPDX-License-Identifier: APACHE-2.0
+
 annotations:
-  category: Database
   images: |
     - name: os-shell
-      image: sealos.hub:5000/kube4/os-shell:12-debian-12-r51
+      image: docker.io/bitnami/os-shell:12-debian-12-r51
     - name: redis-cluster
-      image: sealos.hub:5000/kube4/redis-cluster:8.2.7-debian-12-r0
+      image: docker.io/bitnami/redis-cluster:8.2.1-debian-12-r0
     - name: redis-exporter
-      image: sealos.hub:5000/kube4/redis-exporter:1.76.0-debian-12-r0
+      image: docker.io/bitnami/redis-exporter:1.76.0-debian-12-r0
   licenses: Apache-2.0
   tanzuCategory: service
 apiVersion: v2
-appVersion: 8.2.7
+appVersion: 8.2.1
 dependencies:
 - name: common
   repository: oci://registry-1.docker.io/bitnamicharts
