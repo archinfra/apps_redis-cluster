@@ -1,15 +1,25 @@
 component: redis-cluster
 
+distribution:
+  version: 13.0.5-archinfra.1
+
 redis:
-  version: 8.2.1
+  version: 8.10.1
+  runtimeRevision: r1
 
 chart:
-  version: 13.0.5
-  source: bitnami/redis-cluster
+  version: 13.0.5-archinfra.1
+  upstream: bitnami/redis-cluster
+  upstreamVersion: 13.0.5
 
 redisExporter:
-  version: 1.76.0
+  version: 1.89.0
+  runtimeRevision: r1
 
-runtimeContract: bitnami-redis-cluster-runtime
+helper:
+  image: busybox
+  version: 1.37.0-glibc
+
+runtimeContract: bitnami-redis-cluster-runtime-v1
 maintainer: archinfra
 profile: production
