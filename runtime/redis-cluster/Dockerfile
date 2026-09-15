@@ -8,9 +8,13 @@ ARG BITNAMI_CONTAINERS_REF=31d7973ac4a12f31662cf06c0e636d858e984184
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
-    && git clone https://github.com/bitnami/containers.git /src/bitnami-containers \
+    && git init /src/bitnami-containers \
     && cd /src/bitnami-containers \
-    && git checkout "${BITNAMI_CONTAINERS_REF}"
+    && git remote add origin https://github.com/bitnami/containers.git \
+    && git sparse-checkout init --cone \
+    && git sparse-checkout set bitnami/redis-cluster/8.10/debian-12 \
+    && git fetch --depth 1 origin "${BITNAMI_CONTAINERS_REF}" \
+    && git checkout --detach FETCH_HEAD
 
 FROM redis:8.10.1-bookworm
 
