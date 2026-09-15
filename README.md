@@ -1,53 +1,247 @@
-# app_redis-cluster
+# apps_redis-cluster
 
-Redis Cluster offline delivery repository.
+Archinfra-maintained Redis Cluster offline delivery repository.
 
-This repository is not just a Helm chart wrapper. It packages chart, images, monitoring integration, and offline delivery into a single `.run` installer so that a new maintainer, or a general-purpose AI with no background context, can still deploy and verify Redis Cluster end to end.
+The repository packages an archinfra-maintained Helm chart fork, source-built Redis runtime, exporter, monitoring resources, and architecture-specific offline `.run` installers. The production baseline is Redis `8.10.1` for both amd64 and arm64.
 
-## What This Installer Does
+## Architecture
 
-The installer provides four actions:
+```text
+Redis 8.10.1 pinned source
+        |
+        +-- redis-server / redis-cli
+        +-- matching upstream redis.conf
+        v
+archinfra Redis Cluster runtime
+        |
+        +-- transitional Bitnami-compatible cluster bootstrap contract
+        +-- non-root UID 1001
+        +-- Debian 12 runtime
+        v
+archinfra redis-cluster chart fork
+        |
+        +-- production values
+        +-- Kubernetes Secret authentication
+        +-- ServiceMonitor / PrometheusRule
+        +-- Grafana dashboards
+        v
+offline .run installer
+```
+
+Bitnami remains an upstream code reference. The production Redis image is not pulled from `bitnami/redis-cluster` or `bitnamilegacy`; archinfra builds Redis from the pinned official Redis source commit.
+
+## Production Baseline
+
+| Component | Baseline |
+| --- | --- |
+| Redis | `8.10.1` |
+| Redis source commit | `3399357e7c17b668289386b8a15a3037bc4527b1` |
+| Runtime | Debian 12, UID 1001 |
+| Chart | `13.0.5-archinfra.1` |
+| Upstream chart reference | Bitnami `redis-cluster 13.0.5` |
+| redis_exporter | `1.89.0` |
+| Architectures | amd64, arm64 |
+| Offline installer | `0.1.7` |
+| Monitoring | V2 |
+
+See `UPSTREAM.yaml`, `VERSION`, and `docs/version-matrix.md` for pinned provenance and maintenance policy.
+
+## What The Installer Does
+
+The installer supports:
 
 - `install`
 - `status`
 - `uninstall`
 - `help`
 
-During `install`, it will:
+During installation it:
 
-1. Extract the embedded chart and image metadata from the `.run` package.
-2. Load, retag, and push required images to the target internal registry unless `--skip-image-prepare` is used.
-3. Detect whether the cluster supports `ServiceMonitor`.
-4. Render the final Helm arguments, including images, storage, monitoring, and resource profile.
-5. Run `helm upgrade --install`.
-6. Print the resulting Pods, Services, PVCs, and ServiceMonitor state.
+1. Extracts the embedded chart and image payload.
+2. Creates or reuses the Redis authentication Secret.
+3. Loads, retags, and pushes packaged images unless `--skip-image-prepare` is used.
+4. Detects ServiceMonitor and PrometheusRule CRDs.
+5. Applies archinfra production defaults and the requested resource profile.
+6. Runs `helm upgrade --install`.
+7. Shows resulting Pods, Services, PVCs, and monitoring objects.
 
-That means users normally do not need to manually run:
-
-- `docker load`
-- `docker tag`
-- `docker push`
-- `helm dependency build`
-- `kubectl apply` for monitoring objects
+The target machine does **not** require `jq`. `jq` is used only on the build host.
 
 ## Quick Start
 
-Install with defaults:
+Default production-style install:
 
 ```bash
 ./redis-cluster-installer-amd64.run install -y
 ```
 
-Install with the recommended default profile for ordinary production-style traffic:
+The first install automatically creates Secret `redis-cluster-auth` with a random password. Later upgrades reuse that Secret.
+
+Use an externally managed Secret:
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
-  --resource-profile mid \
-  --storage-class nfs \
+  --existing-secret redis-prod-auth \
+  --secret-key redis-password \
   -y
 ```
 
-Install for a small demo environment:
+Seed a managed Secret from a password file:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --password-file /secure/redis.password \
+  -y
+```
+
+Rotate an installer-managed password explicitly:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --rotate-password \
+  -y
+```
+
+`--password` remains available for compatibility, but `--password-file` or `--existing-secret` is preferred because command-line values can remain in shell history.
+
+## Default Deployment Contract
+
+- namespace: `aict`
+- release: `redis-cluster`
+- total nodes: `6`
+- replicas per master: `1`
+- topology: `3 masters + 3 replicas`
+- authentication: Kubernetes Secret mounted through `REDIS_PASSWORD_FILE`
+- managed Secret: `${release}-auth`
+- password key: `redis-password`
+- storage class: `nfs`
+- storage size: `10Gi` per Redis Pod
+- resource profile: `mid`
+- metrics: enabled
+- ServiceMonitor: enabled when the CRD exists
+- PrometheusRule: enabled when the CRD exists
+- wait timeout: `10m`
+- default image repository: `sealos.hub:5000/kube4`
+
+The installer never passes the Redis password through Helm values and never prints the password in command previews or post-install output.
+
+The authentication Secret is intentionally retained on uninstall so a reinstall against retained PVCs does not silently change credentials.
+
+## Access
+
+Internal endpoints with default release/namespace:
+
+- Redis service: `redis-cluster.aict.svc.cluster.local:6379`
+- headless service: `redis-cluster-headless.aict.svc.cluster.local`
+- cluster bus: `16379`
+- metrics service: `redis-cluster-metrics.aict.svc.cluster.local:9121`
+
+Retrieve the password only when operationally required:
+
+```bash
+kubectl get secret redis-cluster-auth -n aict \
+  -o jsonpath='{.data.redis-password}' | base64 -d
+```
+
+Example connectivity check without placing the password in the process arguments:
+
+```bash
+kubectl exec -n aict redis-cluster-0 -- sh -c \
+  'REDISCLI_AUTH="$(cat /opt/bitnami/redis/secrets/redis-password)" redis-cli cluster info'
+```
+
+## Resource Profiles
+
+| Profile | Redis request | Redis limit | Redis maxmemory | repl-backlog-size |
+| --- | --- | --- | --- | --- |
+| `low` | `200m / 256Mi` | `500m / 512Mi` | `384mb` | `16mb` |
+| `mid` | `500m / 1Gi` | `1 CPU / 2Gi` | `1536mb` | `64mb` |
+| `high` | `1 CPU / 2Gi` | `2 CPU / 4Gi` | `3gb` | `128mb` |
+
+`mid` is the default. `midd`, `middle`, and `medium` remain accepted aliases.
+
+`maxmemory` is intentionally lower than the container memory limit to reserve headroom for allocator metadata, client and replication buffers, AOF/RDB fork copy-on-write, and process overhead.
+
+Common Redis production defaults include:
+
+- `maxmemory-policy noeviction`
+- `maxclients 10000`
+- `tcp-keepalive 300`
+- `cluster-node-timeout 15000`
+- AOF enabled with `appendfsync everysec`
+- automatic AOF rewrite thresholds
+- explicit replication backlog
+- slowlog defaults
+
+## Monitoring V2
+
+Monitoring is enabled by default and uses a single rule source in `charts/redis-cluster/values-archinfra.yaml`.
+
+Created resources:
+
+- redis_exporter sidecar
+- metrics Service
+- ServiceMonitor
+- PrometheusRule
+- Grafana dashboard ConfigMap
+
+Discovery label:
+
+```text
+monitoring.archinfra.io/stack=default
+```
+
+Grafana dashboards:
+
+- `Redis / Overview`
+- `Redis / Performance`
+
+Alert coverage includes:
+
+- exporter scrape down
+- Redis connectivity down
+- cluster state not OK
+- incomplete/FAIL/PFAIL slots
+- missing replicas
+- replication lag
+- memory 80%/90%
+- fragmentation and evictions
+- connection utilization, rejected connections, blocked clients
+- AOF rewrite/write failures
+- RDB save failures
+- command latency
+- CPU saturation
+- PVC 80%/90%
+- repeated Pod restarts
+- OOMKilled
+
+If ServiceMonitor or PrometheusRule CRDs are absent, the installer disables the unsupported object instead of failing the Redis deployment.
+
+## Registry Handling
+
+No registry username or password is embedded in the installer.
+
+By default the installer uses the current Docker credential configuration. To log in explicitly:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --registry harbor.example.com/kube4 \
+  --registry-user robot-account \
+  --registry-password-file /secure/harbor.password \
+  -y
+```
+
+If the required images are already present in the target registry:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --skip-image-prepare \
+  -y
+```
+
+## Advanced Installation Examples
+
+Small environment:
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
@@ -55,7 +249,7 @@ Install for a small demo environment:
   -y
 ```
 
-Install for a heavier traffic scenario:
+Higher-resource environment:
 
 ```bash
 ./redis-cluster-installer-amd64.run install \
@@ -64,7 +258,17 @@ Install for a heavier traffic scenario:
   -y
 ```
 
-Pass through raw Helm arguments for advanced customization:
+Disable monitoring objects:
+
+```bash
+./redis-cluster-installer-amd64.run install \
+  --disable-metrics \
+  --disable-servicemonitor \
+  --disable-prometheusrule \
+  -y
+```
+
+Pass non-secret advanced Helm values:
 
 ```bash
 ./redis-cluster-installer-amd64.run install -y -- \
@@ -72,384 +276,139 @@ Pass through raw Helm arguments for advanced customization:
   --set redis.extraEnvVars[0].value=Asia/Shanghai
 ```
 
-## Default Deployment Contract
+The installer rejects password-bearing Helm passthrough arguments. Authentication changes must use the Secret-oriented installer options.
 
-Default installer values:
+## Installer Parameters
 
-- namespace: `aict`
-- release name: `redis-cluster`
-- total nodes: `6`
-- replicas per master: `1`
-- resulting topology: `3 master + 3 replica`
-- password: `Redis@Passw0rd`
-- storage class: `nfs`
-- storage size: `10Gi`
-- metrics: `true`
-- ServiceMonitor: `true`
-- resource profile: `mid`
-- wait timeout: `10m`
-- target registry repo: `sealos.hub:5000/kube4`
+Authentication:
 
-The default `mid` profile is the baseline profile for a normal shared environment and is intended as the starting point for roughly `500-1000` concurrent requests and around `10000` active users. It is still a baseline, not a strict capacity guarantee. If workload shape is cache-heavy, key size is large, or write amplification is high, raise resources and possibly increase cluster size.
+- `--existing-secret`
+- `--secret-key`
+- `--password-file`
+- `--password` (compatibility only)
+- `--rotate-password`
 
-The installer also accepts `midd` as an alias of `mid` to match historical wording.
-
-## Default Access, Endpoints, And Credentials
-
-Internal Service endpoints:
-
-- cluster entry: `redis-cluster.aict.svc.cluster.local:6379`
-- headless service: `redis-cluster-headless.aict.svc.cluster.local`
-- cluster bus port: `16379`
-- metrics service: `redis-cluster-metrics.aict.svc.cluster.local:9121`
-
-Default password:
-
-- `Redis@Passw0rd`
-
-Typical in-cluster client example:
-
-```bash
-redis-cli -c -h redis-cluster.aict.svc.cluster.local -p 6379 -a 'Redis@Passw0rd'
-```
-
-Production recommendation:
-
-- always override the default password during first install
-- keep the service internal unless there is a clear external access design
-
-## Resource Profiles
-
-Three resource profiles are built in:
-
-- `low`: demo, development, or functional validation
-- `mid`: normal shared environment, default profile, baseline for `500-1000` concurrency and `~10000` users
-- `high`: higher concurrency or larger working set
-
-The profile mainly controls:
-
-- Redis main container requests and limits
-- `redis-exporter` sidecar requests and limits
-- init/helper containers such as `volumePermissions`, `sysctlImage`, and `updateJob`
-
-### Per-Component Resource Matrix
-
-| Profile | Scenario | Redis request | Redis limit | Exporter request | Exporter limit | Helper init/request | Helper init/limit |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `low` | demo or test | `200m / 256Mi` | `500m / 512Mi` | `50m / 64Mi` | `100m / 128Mi` | `20-30m / 32-64Mi` | `50-100m / 64-128Mi` |
-| `mid` | normal shared environment | `500m / 1Gi` | `1 / 2Gi` | `100m / 128Mi` | `200m / 256Mi` | `30-50m / 64Mi` | `100-200m / 128Mi` |
-| `high` | higher concurrency | `1 / 2Gi` | `2 / 4Gi` | `200m / 256Mi` | `500m / 512Mi` | `50-100m / 128Mi` | `200-300m / 256Mi` |
-
-### Default Total Steady-State Demand
-
-The table below assumes the default topology of `6` Redis Pods and metrics enabled:
-
-| Profile | Total CPU request | Total memory request | Total CPU limit | Total memory limit | Storage |
-| --- | --- | --- | --- | --- | --- |
-| `low` | about `1.5 CPU` | about `1.875 GiB` | about `3.6 CPU` | about `3.75 GiB` | `60Gi` |
-| `mid` | about `3.6 CPU` | about `6.75 GiB` | about `7.2 CPU` | about `13.5 GiB` | `60Gi` |
-| `high` | about `7.2 CPU` | about `13.5 GiB` | about `15 CPU` | about `27 GiB` | `60Gi` |
-
-Notes:
-
-- totals above describe steady-state Redis Pods plus exporter sidecars
-- init containers and update jobs add short-lived overhead during rollout
-- if you increase node count, total demand scales almost linearly
-
-## Monitoring Design
-
-Monitoring is enabled by default:
-
-- `metrics.enabled=true`
-- `metrics.serviceMonitor.enabled=true`
-- `metrics.prometheusRule.enabled=true`
-
-What gets created by default:
-
-- `redis-exporter` sidecar
-- metrics Service
-- `ServiceMonitor`
-- `PrometheusRule`
-- Grafana dashboard ConfigMap
-
-Default monitoring label:
-
-- `monitoring.archinfra.io/stack=default`
-
-Grafana auto-import contract:
-
-- dashboard ConfigMap label: `grafana_dashboard=1`
-- dashboard folder annotation: `grafana_folder=Middleware/Redis`
-
-Built-in alerts:
-
-- `RedisExporterDown`
-- `RedisMemoryUsageHigh`
-- `RedisRejectedConnectionsHigh`
-- `RedisCacheHitRatioLow`
-
-Built-in dashboard panels:
-
-- Exporter Up
-- Connected Clients
-- Memory Used
-- Cache Hit Ratio
-- Command Throughput
-- Memory Usage
-
-This means a Prometheus stack that selects by that label will discover Redis automatically after install.
-
-If the cluster does not have the `ServiceMonitor` CRD:
-
-- exporter remains enabled
-- `ServiceMonitor` creation is automatically disabled
-- Redis install does not fail just because monitoring CRDs are missing
-
-If the cluster does not have the `PrometheusRule` CRD:
-
-- Redis exporter and `ServiceMonitor` still work
-- `PrometheusRule` creation is automatically disabled
-- Redis install does not fail just because alerting CRDs are missing
-
-## Dependency And Integration View
-
-### What Redis Depends On
-
-Redis Cluster requires:
-
-- a working Kubernetes cluster
-- `kubectl`
-- `helm`
-- `docker` unless `--skip-image-prepare` is used
-- a usable StorageClass, typically `nfs`
-
-Redis does not require these components to start:
-
-- MySQL
-- Nacos
-- MinIO
-- RabbitMQ
-- MongoDB
-- Milvus
-
-### What Usually Depends On Redis
-
-In integrated business systems, Redis is usually consumed by:
-
-- business API services
-- web backends
-- AI application services
-- session, cache, token, or rate-limit components
-
-Redis is usually a downstream shared capability, not a startup dependency for the other middleware packages.
-
-### Relationship With Prometheus
-
-If your Prometheus stack follows the shared label contract, Redis auto-registers into monitoring through:
-
-- `ServiceMonitor`
-- label `monitoring.archinfra.io/stack=default`
-
-## Common Installation Scenarios
-
-### 1. Default install
-
-```bash
-./redis-cluster-installer-amd64.run install -y
-```
-
-### 2. Demo or development install
-
-```bash
-./redis-cluster-installer-amd64.run install \
-  --resource-profile low \
-  -y
-```
-
-### 3. Normal shared environment
-
-```bash
-./redis-cluster-installer-amd64.run install \
-  --resource-profile mid \
-  --storage-class nfs \
-  --password 'StrongRedis@2026' \
-  -y
-```
-
-### 4. Higher concurrency environment
-
-```bash
-./redis-cluster-installer-amd64.run install \
-  --resource-profile high \
-  --nodes 6 \
-  --replicas 1 \
-  --storage-class nfs \
-  -y
-```
-
-### 5. Disable monitoring
-
-```bash
-./redis-cluster-installer-amd64.run install \
-  --disable-metrics \
-  --disable-servicemonitor \
-  -y
-```
-
-### 6. Images already exist in the target registry
-
-```bash
-./redis-cluster-installer-amd64.run install \
-  --registry sealos.hub:5000/kube4 \
-  --skip-image-prepare \
-  -y
-```
-
-### 7. Pass through unsupported Helm arguments
-
-```bash
-./redis-cluster-installer-amd64.run install -y -- \
-  --set cluster.externalAccess.enabled=true
-```
-
-## Installer Help Summary
-
-Main parameters:
+Deployment:
 
 - `--namespace`
 - `--release-name`
 - `--nodes`
 - `--replicas`
-- `--password`
 - `--storage-class`
 - `--storage-size`
 - `--resource-profile`
-- `--enable-metrics`
-- `--disable-metrics`
-- `--enable-servicemonitor`
-- `--disable-servicemonitor`
+- `--wait-timeout`
+
+Monitoring:
+
+- `--enable-metrics` / `--disable-metrics`
+- `--enable-servicemonitor` / `--disable-servicemonitor`
+- `--enable-prometheusrule` / `--disable-prometheusrule`
 - `--service-monitor-namespace`
+
+Registry:
+
 - `--registry`
 - `--registry-user`
-- `--registry-password`
+- `--registry-password-file`
+- `--registry-password` (compatibility only)
 - `--image-pull-policy`
 - `--skip-image-prepare`
-- `--wait-timeout`
+
+Lifecycle:
+
 - `--delete-pvc`
+- `--yes`
 - `--`
 
-The trailing `--` is the escape hatch for advanced Helm tuning when the installer does not expose a specific chart option.
+Run the installer with `help` for the authoritative command reference.
 
-## Post-Install Verification
+## Verification
 
-Check release status:
+Status:
 
 ```bash
 ./redis-cluster-installer-amd64.run status -n aict
 ```
 
-Check Pods:
+Pods and PVCs:
 
 ```bash
-kubectl get pods -n aict -l app.kubernetes.io/instance=redis-cluster
+kubectl get pods,pvc -n aict -l app.kubernetes.io/instance=redis-cluster
 ```
 
-Check Services:
+Cluster health:
 
 ```bash
-kubectl get svc -n aict -l app.kubernetes.io/instance=redis-cluster
+kubectl exec -n aict redis-cluster-0 -- sh -c \
+  'REDISCLI_AUTH="$(cat /opt/bitnami/redis/secrets/redis-password)" redis-cli cluster info'
 ```
 
-Check monitoring objects:
+Expected signals include:
 
-```bash
-kubectl get servicemonitor -n aict
-```
+- all six Pods Running/Ready
+- `cluster_state:ok`
+- `cluster_slots_assigned:16384`
+- three masters and three replicas
+- all PVCs Bound
+- exporter metrics scrape successfully
+- ServiceMonitor/PrometheusRule exist when their CRDs are installed
 
-Quick connectivity test:
+## CI Release Gate
 
-```bash
-kubectl exec -it -n aict redis-cluster-0 -- redis-cli -a 'Redis@Passw0rd' cluster info
-```
+Both amd64 and arm64 native GitHub runners build the Redis runtime from source and execute a real six-node Redis Cluster E2E test.
 
-Success signals:
+The gate validates:
 
-- all Redis Pods become `Running`
-- cluster state reports `ok`
-- PVCs are bound
-- `ServiceMonitor` exists when the CRD is installed
+- pinned Redis `8.10.1`
+- non-root runtime and dynamic linker dependencies
+- password-file authentication with special characters
+- AOF
+- 3 masters + 3 replicas
+- all 16384 slots
+- cluster-routed SET/GET
+- persistent data volume reuse
+- forced node IP replacement and `nodes.conf` repair
+- base Chart rendering
+- production Chart rendering
+- Secret-first installer policy
+- Monitoring V2 rendering
+- offline installer checksum and artifact upload
 
 ## Uninstall
 
-Uninstall release only:
+Release only:
 
 ```bash
 ./redis-cluster-installer-amd64.run uninstall -y
 ```
 
-Uninstall and delete PVCs:
+Release plus PVCs:
 
 ```bash
 ./redis-cluster-installer-amd64.run uninstall --delete-pvc -y
 ```
 
+The Redis authentication Secret is retained by design.
+
 ## Troubleshooting
 
-### Pods stay Pending
+If Pods are Pending, check resource capacity, StorageClass existence, PVC binding, and scheduling events.
 
-Check:
+If monitoring objects are missing, verify the corresponding Prometheus Operator CRDs and the `monitoring.archinfra.io/stack=default` selector contract.
 
-- whether the cluster has enough CPU and memory for the selected profile
-- whether the requested `StorageClass` exists
-- whether PVCs are bound successfully
+If images fail to push or pull, verify registry reachability, Docker credentials, repository permissions, and whether `--skip-image-prepare` was selected appropriately.
 
-### ServiceMonitor not created
+Useful commands:
 
-Check:
+```bash
+kubectl get pods -n aict
+kubectl get pvc -n aict
+kubectl get events -n aict --sort-by=.lastTimestamp
+kubectl describe pod redis-cluster-0 -n aict
+```
 
-- whether `servicemonitors.monitoring.coreos.com` CRD exists
-- whether `--disable-servicemonitor` was passed
-
-### Images fail to pull
-
-Check:
-
-- whether the target internal registry is reachable
-- whether `--registry` points to the correct repo prefix
-- whether `--skip-image-prepare` was used only after images were already present
-
-### Cluster is up but capacity is insufficient
-
-Actions:
-
-- raise `--resource-profile` from `low` to `mid` or `high`
-- increase `--nodes`
-- adjust advanced chart parameters through `--`
-
-## Guidance For AI Or Automated Operators
-
-If an AI agent is using this installer without human context, it should assume:
-
-- `mid` is the safe default profile
-- `low` is only for demo or lightweight testing
-- `high` should be used when the cluster already has enough spare resources
-- if the target registry already contains images, prefer `--skip-image-prepare`
-
-Before installation, the AI should verify:
-
-- current kube context is correct
-- target namespace is intended
-- the chosen `StorageClass` exists
-- the cluster has enough allocatable CPU and memory for the selected profile
-
-If installation fails, the AI should inspect:
-
-- `kubectl get pods -n <namespace>`
-- `kubectl describe pod <pod> -n <namespace>`
-- `kubectl get pvc -n <namespace>`
-- `kubectl get events -n <namespace> --sort-by=.lastTimestamp`
-
-## Build And Release
+## Build
 
 Build architecture-specific offline packages:
 
@@ -459,4 +418,6 @@ Build architecture-specific offline packages:
 ./build.sh --arch all
 ```
 
-The GitHub Actions workflow builds multi-arch release packages on `main` and on tags.
+The build host requires Docker and `jq`. The generated target installer does not require `jq`.
+
+GitHub Actions builds both architecture-specific `.run` artifacts on pull requests and `main`; tag workflows additionally publish release files.
