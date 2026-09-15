@@ -8,28 +8,46 @@ chart = (ROOT / "charts/redis-cluster/Chart.yaml").read_text()
 images = json.loads((ROOT / "images/image.json").read_text())
 upstream = (ROOT / "UPSTREAM.yaml").read_text()
 statefulset = (ROOT / "charts/redis-cluster/templates/redis-statefulset.yaml").read_text()
+runtime_dockerfile = (ROOT / "runtime/redis-cluster/Dockerfile").read_text()
+exporter_dockerfile = (ROOT / "runtime/redis-exporter/Dockerfile").read_text()
 
 required_chart_markers = [
     "name: redis-cluster",
-    "version: 13.0.5",
-    "appVersion: 8.2.1",
-    "repository: oci://registry-1.docker.io/bitnamicharts",
+    "version: 13.0.5-archinfra.1",
+    "appVersion: 8.10.1",
+    "archinfra.io/upstream-chart: bitnami/redis-cluster@13.0.5",
 ]
 for marker in required_chart_markers:
     if marker not in chart:
-        raise SystemExit(f"chart contract mismatch: missing {marker!r}")
+        raise SystemExit(f"chart fork mismatch: missing {marker!r}")
 
 required_upstream_markers = [
-    "version: 13.0.5",
-    "appVersion: 8.2.1",
-    "contract: bitnami-redis-cluster-runtime",
+    "upstreamVersion: 13.0.5",
+    "forkVersion: 13.0.5-archinfra.1",
+    "appVersion: 8.10.1",
+    "ownership: archinfra-fork",
+    "strategy: fork-and-maintain",
 ]
 for marker in required_upstream_markers:
     if marker not in upstream:
         raise SystemExit(f"UPSTREAM.yaml mismatch: missing {marker!r}")
 
+# Transitional compatibility contract: the chart still invokes these paths while
+# the data-plane image is now built and owned by archinfra.
 if "/opt/bitnami/scripts/redis-cluster/entrypoint.sh" not in statefulset:
-    raise SystemExit("unexpected chart runtime: Bitnami redis-cluster entrypoint contract not found")
+    raise SystemExit("unexpected runtime contract: redis-cluster entrypoint path changed")
+
+runtime_markers = [
+    "FROM redis:8.10.1-bookworm",
+    "31d7973ac4a12f31662cf06c0e636d858e984184",
+    "/opt/bitnami/scripts/redis-cluster/entrypoint.sh",
+]
+for marker in runtime_markers:
+    if marker not in runtime_dockerfile:
+        raise SystemExit(f"runtime image contract mismatch: missing {marker!r}")
+
+if "oliver006/redis_exporter:v1.89.0" not in exporter_dockerfile:
+    raise SystemExit("redis exporter baseline must be v1.89.0")
 
 arches = {"amd64", "arm64"}
 for arch in arches:
@@ -40,19 +58,26 @@ for arch in arches:
 redis_images = [item for item in images if item["tar"].startswith("redis-cluster-")]
 if len(redis_images) != 2:
     raise SystemExit("expected one redis-cluster image for each architecture")
-
 for item in redis_images:
-    pull = item["pull"]
-    if pull.startswith("redis:") or "/library/redis:" in pull:
-        raise SystemExit(
-            f"incompatible Redis image for Bitnami chart runtime: {pull}; "
-            "use an image that provides /opt/bitnami/scripts/redis-cluster"
-        )
-    if "bitnamilegacy/redis-cluster:8.2.1-debian-12-r0" not in pull:
-        raise SystemExit(f"unexpected redis-cluster compatibility image: {pull}")
+    if item.get("build") != "runtime/redis-cluster":
+        raise SystemExit(f"redis-cluster must be built by archinfra CI: {item}")
+    if item.get("pull"):
+        raise SystemExit(f"redis-cluster must not pull an external runtime image: {item}")
+    if not item["tag"].endswith("redis-cluster:8.10.1-r1"):
+        raise SystemExit(f"unexpected redis-cluster target version: {item['tag']}")
+
+exporter_images = [item for item in images if item["tar"].startswith("redis-exporter-")]
+for item in exporter_images:
+    if item.get("build") != "runtime/redis-exporter":
+        raise SystemExit(f"redis-exporter must be built by archinfra CI: {item}")
 
 for item in images:
+    source = f"{item.get('pull', '')} {item.get('tag', '')}"
+    if "bitnamilegacy" in source or "bitnami/redis-cluster" in source:
+        raise SystemExit(f"production BOM still depends on Bitnami Redis image: {item}")
     if item.get("platform") != f"linux/{item.get('arch')}":
         raise SystemExit(f"platform mismatch: {item}")
+    if bool(item.get("pull")) == bool(item.get("build")):
+        raise SystemExit(f"image must have exactly one source (pull/build): {item}")
 
-print("upstream chart and image runtime contract: OK")
+print("archinfra redis-cluster fork/runtime contract: OK")
