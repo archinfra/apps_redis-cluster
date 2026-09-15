@@ -1,7 +1,29 @@
-# Derived from the public Bitnami redis-cluster runtime contract (Apache-2.0)
-# while using the Redis OSS image as the Redis binary source.
+# Archinfra Redis Cluster runtime
 #
-# Upstream Bitnami source is pinned so the runtime contract is reproducible.
+# Redis is built from the upstream Redis 8.10.1 source commit on Debian 12.
+# The initial runtime keeps the public Bitnami redis-cluster shell contract
+# (Apache-2.0) so the forked chart can migrate without rewriting bootstrap
+# semantics in the same release.
+
+FROM debian:bookworm-slim AS redis-builder
+ARG REDIS_VERSION=8.10.1
+ARG REDIS_COMMIT=3399357e7c17b668289386b8a15a3037bc4527b1
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       git \
+       build-essential \
+       libssl-dev \
+       pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && git init /src/redis \
+    && cd /src/redis \
+    && git remote add origin https://github.com/redis/redis.git \
+    && git fetch --depth 1 origin "${REDIS_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${REDIS_COMMIT}"
+RUN make -C /src/redis -j"$(nproc)" BUILD_TLS=yes \
+    && make -C /src/redis install BUILD_TLS=yes PREFIX=/opt/redis-dist
 
 FROM debian:bookworm-slim AS bitnami-source
 ARG BITNAMI_CONTAINERS_REF=31d7973ac4a12f31662cf06c0e636d858e984184
@@ -16,7 +38,7 @@ RUN apt-get update \
     && git fetch --depth 1 origin "${BITNAMI_CONTAINERS_REF}" \
     && git checkout --detach FETCH_HEAD
 
-FROM redis:8.10.1-bookworm
+FROM debian:bookworm-slim
 
 USER root
 
@@ -25,24 +47,25 @@ RUN apt-get update \
        bash \
        ca-certificates \
        hostname \
+       libssl3 \
        openssl \
        procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Reuse the public Apache-2.0 Bitnami shell contract so the forked 13.0.5
-# chart remains compatible while archinfra progressively removes this layer.
+COPY --from=redis-builder /opt/redis-dist/bin/ /opt/bitnami/redis/bin/
+
+# Transitional compatibility layer derived from the public Bitnami source.
 COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/debian-12/prebuildfs/ /
 COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/debian-12/rootfs/ /
 
 RUN mkdir -p \
-      /opt/bitnami/redis/bin \
       /opt/bitnami/redis/etc \
       /opt/bitnami/redis/etc.default \
       /opt/bitnami/redis/logs \
       /opt/bitnami/redis/tmp \
       /bitnami/redis/data \
-    && for bin in /usr/local/bin/redis-*; do \
-         ln -sf "${bin}" "/opt/bitnami/redis/bin/$(basename "${bin}")"; \
+    && for bin in /opt/bitnami/redis/bin/redis-*; do \
+         ln -sf "${bin}" "/usr/local/bin/$(basename "${bin}")"; \
        done \
     && : > /opt/bitnami/redis/etc/redis-default.conf \
     && /opt/bitnami/scripts/redis-cluster/postunpack.sh \
