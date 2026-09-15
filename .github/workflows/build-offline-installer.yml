@@ -61,7 +61,7 @@ jobs:
           esac
 
       - name: Ensure executable permissions
-        run: chmod +x build.sh install.sh runtime/redis-cluster/wait-for-port
+        run: chmod +x build.sh install.sh runtime/redis-cluster/wait-for-port scripts/test-runtime-cluster-e2e.sh
 
       - name: Validate fork metadata
         run: python3 scripts/validate-upstream-contract.py
@@ -84,6 +84,9 @@ jobs:
             /opt/bitnami/redis/bin/redis-cli --version | grep -F "8.10.1"
             ! ldd /opt/bitnami/redis/bin/redis-server | grep -F "not found"
             ! ldd /opt/bitnami/redis/bin/redis-cli | grep -F "not found"
+            grep -Fq "tls-expected-peer-name" /opt/bitnami/redis/etc/redis-default.conf
+            grep -Fq "backupdirname \"backupdir\"" /opt/bitnami/redis/etc/redis-default.conf
+            grep -Eq "^cluster-enabled[[:space:]]+yes$" /opt/bitnami/redis/etc.default/redis.conf
             password_file="$(mktemp)"
             printf "%s" "file-secret-contract" > "$password_file"
             export REDIS_PASSWORD_FILE="$password_file"
@@ -91,6 +94,11 @@ jobs:
             test "$REDIS_PASSWORD" = "file-secret-contract"
             rm -f "$password_file"
           '
+
+      - name: Run six-node Redis Cluster E2E
+        run: |
+          image="archinfra-payload/redis-cluster:8.10.1-r1-${{ matrix.arch }}"
+          ./scripts/test-runtime-cluster-e2e.sh "$image"
 
       - name: Verify installer checksum
         run: |
