@@ -32,7 +32,19 @@ jobs:
           grep -q '/opt/bitnami/scripts/redis-cluster/entrypoint.sh' /tmp/render.yaml
           grep -q 'sealos.hub:5000/kube4/redis-cluster:8.10.1-r1' /tmp/render.yaml
           grep -q 'sealos.hub:5000/kube4/redis-exporter:1.89.0-r1' /tmp/render.yaml
+          grep -q 'archinfra.io/redis-config-baseline: "8.10.1"' /tmp/render.yaml
+          grep -q 'include /opt/bitnami/redis/etc.default/redis.conf' /tmp/render.yaml
+          grep -q 'cluster-enabled yes' /tmp/render.yaml
           grep -q 'version: 13.0.5-archinfra.1' charts/redis-cluster/Chart.yaml
           grep -q 'appVersion: 8.10.1' charts/redis-cluster/Chart.yaml
           ! grep -q 'bitnamilegacy/redis-cluster' images/image.json
           ! grep -q 'bitnami/redis-cluster:' images/image.json
+
+      - name: Validate explicit full-config override contract
+        run: |
+          helm template redis-cluster charts/redis-cluster \
+            -f charts/redis-cluster/values-archinfra.yaml \
+            --set-string 'redis.defaultConfigOverride=port 6380' \
+            > /tmp/render-override.yaml
+          grep -q 'port 6380' /tmp/render-override.yaml
+          ! grep -q 'include /opt/bitnami/redis/etc.default/redis.conf' /tmp/render-override.yaml
