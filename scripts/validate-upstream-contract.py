@@ -9,9 +9,12 @@ images = json.loads((ROOT / "images/image.json").read_text())
 upstream = (ROOT / "UPSTREAM.yaml").read_text()
 statefulset = (ROOT / "charts/redis-cluster/templates/redis-statefulset.yaml").read_text()
 configmap = (ROOT / "charts/redis-cluster/templates/configmap.yaml").read_text()
+values_archinfra = (ROOT / "charts/redis-cluster/values-archinfra.yaml").read_text()
+dashboard = (ROOT / "charts/redis-cluster/templates/grafana-dashboard.yaml").read_text()
 runtime_dockerfile = (ROOT / "runtime/redis-cluster/Dockerfile").read_text()
 exporter_dockerfile = (ROOT / "runtime/redis-exporter/Dockerfile").read_text()
 runtime_e2e = (ROOT / "scripts/test-runtime-cluster-e2e.sh").read_text()
+installer = (ROOT / "install.sh").read_text()
 
 required_chart_markers = [
     "name: redis-cluster",
@@ -34,8 +37,6 @@ for marker in required_upstream_markers:
     if marker not in upstream:
         raise SystemExit(f"UPSTREAM.yaml mismatch: missing {marker!r}")
 
-# Transitional compatibility contract: the chart still invokes these paths while
-# the Redis binary and final runtime image are now built by archinfra.
 if "/opt/bitnami/scripts/redis-cluster/entrypoint.sh" not in statefulset:
     raise SystemExit("unexpected runtime contract: redis-cluster entrypoint path changed")
 
@@ -55,12 +56,15 @@ for marker in runtime_markers:
 if "FROM redis:" in runtime_dockerfile:
     raise SystemExit("runtime must build Redis from pinned source, not inherit an external Redis runtime image")
 
-# The chart must not vendor a full redis.conf snapshot anymore. Its default
-# ConfigMap is a small mutable overlay over the source-coupled config in the image.
 required_config_markers = [
     'archinfra.io/redis-config-baseline: "8.10.1"',
     'archinfra.io/redis-config-source: "runtime-image"',
     "include /opt/bitnami/redis/etc.default/redis.conf",
+    "maxmemory ",
+    "maxmemory-policy ",
+    "repl-backlog-size ",
+    "appendfsync ",
+    "cluster-node-timeout ",
     "cluster-enabled yes",
     "# tls-cluster yes",
     "# requirepass archinfra-placeholder",
@@ -69,8 +73,79 @@ for marker in required_config_markers:
     if marker not in configmap:
         raise SystemExit(f"chart config overlay mismatch: missing {marker!r}")
 
-if len(configmap.encode()) > 16 * 1024:
+if len(configmap.encode()) > 20 * 1024:
     raise SystemExit("chart configmap is too large; do not re-vendor a full redis.conf snapshot")
+
+required_production_markers = [
+    "usePasswordFiles: true",
+    "existingSecretPasswordKey: redis-password",
+    "maxmemory: 1536mb",
+    "maxmemoryPolicy: noeviction",
+    "replBacklogSize: 64mb",
+    "alert: RedisExporterDown",
+    'expr: up{service=',
+    "alert: RedisDown",
+    "alert: RedisClusterStateNotOk",
+    "alert: RedisClusterSlotsIncomplete",
+    "alert: RedisReplicaMissing",
+    "alert: RedisReplicationLagHigh",
+    "alert: RedisMemoryUsageCritical",
+    "alert: RedisAOFRewriteFailed",
+    "alert: RedisRDBSaveFailed",
+    "alert: RedisCommandLatencyHigh",
+    "alert: RedisPVCUsageCritical",
+    "alert: RedisPodOOMKilled",
+]
+for marker in required_production_markers:
+    if marker not in values_archinfra:
+        raise SystemExit(f"production values mismatch: missing {marker!r}")
+
+required_dashboard_markers = [
+    'redis-overview.json',
+    'redis-performance.json',
+    '"title": "Redis / Overview"',
+    '"title": "Redis / Performance"',
+    "redis_connected_slave_lag_seconds",
+    "redis_commands_duration_seconds_total",
+    "kubelet_volume_stats_used_bytes",
+]
+for marker in required_dashboard_markers:
+    if marker not in dashboard:
+        raise SystemExit(f"dashboard V2 mismatch: missing {marker!r}")
+
+if (ROOT / "monitoring/redis-alert-rules.yaml").exists():
+    raise SystemExit("duplicate alert source detected: keep Prometheus rules in values-archinfra.yaml only")
+
+required_installer_markers = [
+    'REDIS_PASSWORD=""',
+    'REGISTRY_USER=""',
+    'REGISTRY_PASS=""',
+    '--password-file',
+    '--existing-secret',
+    '--registry-password-file',
+    'existingSecret=${REDIS_SECRET_NAME}',
+    'existingSecretPasswordKey=${REDIS_SECRET_KEY}',
+    '--set "usePasswordFiles=true"',
+    '-f "${CHART_DIR}/values-archinfra.yaml"',
+    'redis.runtimeConfig.maxmemory=384mb',
+    'redis.runtimeConfig.maxmemory=1536mb',
+    'redis.runtimeConfig.maxmemory=3gb',
+]
+for marker in required_installer_markers:
+    if marker not in installer:
+        raise SystemExit(f"installer security contract mismatch: missing {marker!r}")
+
+for forbidden in [
+    "Redis@Passw0rd",
+    'REGISTRY_PASS="passw0rd"',
+    '--set-string "password=${REDIS_PASSWORD}"',
+    '--set-string "global.redis.password=${REDIS_PASSWORD}"',
+]:
+    if forbidden in installer:
+        raise SystemExit(f"installer contains forbidden credential pattern: {forbidden!r}")
+
+if "jq " in installer or "command -v jq" in installer:
+    raise SystemExit("target installer must not require jq")
 
 required_e2e_markers = [
     "cluster_slots_assigned:16384",
@@ -118,4 +193,4 @@ for item in images:
     if bool(item.get("pull")) == bool(item.get("build")):
         raise SystemExit(f"image must have exactly one source (pull/build): {item}")
 
-print("archinfra redis-cluster fork/runtime contract: OK")
+print("archinfra redis-cluster production contract: OK")
