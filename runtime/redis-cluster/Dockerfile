@@ -92,6 +92,9 @@ COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/de
 COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/debian-12/rootfs/ /
 COPY wait-for-port /usr/local/bin/wait-for-port
 
+# The archinfra chart uses a tiny wrapper config that includes the image's
+# source-coupled baseline. Preserve that base include when an optional
+# overrides.conf file is appended by Bitnami's compatibility library.
 RUN rm -rf /opt/bitnami/checksums \
     && mkdir -p \
       /opt/bitnami/redis/etc \
@@ -103,9 +106,6 @@ RUN rm -rf /opt/bitnami/checksums \
     && for bin in /opt/bitnami/redis/bin/redis-*; do \
          ln -sf "${bin}" "/usr/local/bin/$(basename "${bin}")"; \
        done \
-    # The archinfra chart uses a tiny wrapper config that includes the image's
-    # source-coupled baseline. Preserve that base include when an optional
-    # overrides.conf file is appended by Bitnami's compatibility library.
     && sed -i '/redis_conf_set include "\$REDIS_OVERRIDES_FILE"/d; /redis_conf_unset "include"/d' /opt/bitnami/scripts/libredis.sh \
     && /opt/bitnami/scripts/redis-cluster/postunpack.sh \
     && grep -Fq 'tls-expected-peer-name' /opt/bitnami/redis/etc/redis-default.conf \
