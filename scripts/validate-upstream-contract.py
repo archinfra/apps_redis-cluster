@@ -8,8 +8,10 @@ chart = (ROOT / "charts/redis-cluster/Chart.yaml").read_text()
 images = json.loads((ROOT / "images/image.json").read_text())
 upstream = (ROOT / "UPSTREAM.yaml").read_text()
 statefulset = (ROOT / "charts/redis-cluster/templates/redis-statefulset.yaml").read_text()
+configmap = (ROOT / "charts/redis-cluster/templates/configmap.yaml").read_text()
 runtime_dockerfile = (ROOT / "runtime/redis-cluster/Dockerfile").read_text()
 exporter_dockerfile = (ROOT / "runtime/redis-exporter/Dockerfile").read_text()
+runtime_e2e = (ROOT / "scripts/test-runtime-cluster-e2e.sh").read_text()
 
 required_chart_markers = [
     "name: redis-cluster",
@@ -43,6 +45,8 @@ runtime_markers = [
     "FROM debian:bookworm-slim",
     "31d7973ac4a12f31662cf06c0e636d858e984184",
     "/opt/bitnami/scripts/redis-cluster/entrypoint.sh",
+    "COPY --from=redis-builder /src/redis/redis.conf /opt/bitnami/redis/etc/redis-default.conf",
+    'io.archinfra.redis.config.commit="${REDIS_COMMIT}"',
 ]
 for marker in runtime_markers:
     if marker not in runtime_dockerfile:
@@ -50,6 +54,35 @@ for marker in runtime_markers:
 
 if "FROM redis:" in runtime_dockerfile:
     raise SystemExit("runtime must build Redis from pinned source, not inherit an external Redis runtime image")
+
+# The chart must not vendor a full redis.conf snapshot anymore. Its default
+# ConfigMap is a small mutable overlay over the source-coupled config in the image.
+required_config_markers = [
+    'archinfra.io/redis-config-baseline: "8.10.1"',
+    'archinfra.io/redis-config-source: "runtime-image"',
+    "include /opt/bitnami/redis/etc.default/redis.conf",
+    "cluster-enabled yes",
+    "# tls-cluster yes",
+    "# requirepass archinfra-placeholder",
+]
+for marker in required_config_markers:
+    if marker not in configmap:
+        raise SystemExit(f"chart config overlay mismatch: missing {marker!r}")
+
+if len(configmap.encode()) > 16 * 1024:
+    raise SystemExit("chart configmap is too large; do not re-vendor a full redis.conf snapshot")
+
+required_e2e_markers = [
+    "cluster_slots_assigned:16384",
+    "cluster_known_nodes:6",
+    "expected 3 masters",
+    "expected 3 replicas",
+    "REDIS_PASSWORD_FILE=/run/secrets/redis-password",
+    "nodes.conf was not repaired",
+]
+for marker in required_e2e_markers:
+    if marker not in runtime_e2e:
+        raise SystemExit(f"runtime E2E contract mismatch: missing {marker!r}")
 
 if "oliver006/redis_exporter:v1.89.0" not in exporter_dockerfile:
     raise SystemExit("redis exporter baseline must be v1.89.0")
