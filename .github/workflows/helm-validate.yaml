@@ -15,8 +15,19 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
+      - name: Validate upstream and image contract
+        run: python3 scripts/validate-upstream-contract.py
+
+      - name: Validate image metadata
+        run: python3 -m json.tool images/image.json >/dev/null
+
       - name: Helm lint
         run: helm lint charts/redis-cluster
 
       - name: Helm template render
         run: helm template redis-cluster charts/redis-cluster > /tmp/render.yaml
+
+      - name: Assert Bitnami runtime contract is rendered
+        run: |
+          grep -q '/opt/bitnami/scripts/redis-cluster/entrypoint.sh' /tmp/render.yaml
+          ! grep -q 'docker.io/library/redis:' images/image.json
