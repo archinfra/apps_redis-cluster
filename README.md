@@ -408,9 +408,9 @@ kubectl get events -n aict --sort-by=.lastTimestamp
 kubectl describe pod redis-cluster-0 -n aict
 ```
 
-## Build
+## Build And Artifacts
 
-Build architecture-specific offline packages:
+Build architecture-specific offline packages locally:
 
 ```bash
 ./build.sh --arch amd64
@@ -420,4 +420,4 @@ Build architecture-specific offline packages:
 
 The build host requires Docker and `jq`. The generated target installer does not require `jq`.
 
-GitHub Actions builds both architecture-specific `.run` artifacts on pull requests and `main`; tag workflows additionally publish release files.
+GitHub Actions builds amd64 and arm64 `.run` files on pull requests and on `main`, then stores them as workflow artifacts. Tag builds additionally publish the generated installers as GitHub Release assets.
