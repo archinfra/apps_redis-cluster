@@ -53,6 +53,7 @@ LABEL org.opencontainers.image.title="archinfra-redis-cluster" \
       org.opencontainers.image.version="${REDIS_VERSION}" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later AND Apache-2.0" \
       io.archinfra.redis.source.commit="${REDIS_COMMIT}" \
+      io.archinfra.redis.config.commit="${REDIS_COMMIT}" \
       io.archinfra.bitnami.compat.commit="${BITNAMI_CONTAINERS_REF}"
 
 ENV HOME="/" \
@@ -80,6 +81,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/ /var/cache/apt/archives/*
 
 COPY --from=redis-builder /opt/redis-dist/bin/ /opt/bitnami/redis/bin/
+# Keep Redis binary and default configuration coupled to the same pinned source
+# commit. The chart must never carry a stale full redis.conf snapshot again.
+COPY --from=redis-builder /src/redis/redis.conf /opt/bitnami/redis/etc/redis-default.conf
 
 # Transitional compatibility layer derived from the public Bitnami source.
 # prebuildfs provides the generic shell libraries/licenses; Bitnami binary
@@ -99,8 +103,13 @@ RUN rm -rf /opt/bitnami/checksums \
     && for bin in /opt/bitnami/redis/bin/redis-*; do \
          ln -sf "${bin}" "/usr/local/bin/$(basename "${bin}")"; \
        done \
-    && : > /opt/bitnami/redis/etc/redis-default.conf \
+    # The archinfra chart uses a tiny wrapper config that includes the image's
+    # source-coupled baseline. Preserve that base include when an optional
+    # overrides.conf file is appended by Bitnami's compatibility library.
+    && sed -i '/redis_conf_set include "\$REDIS_OVERRIDES_FILE"/d; /redis_conf_unset "include"/d' /opt/bitnami/scripts/libredis.sh \
     && /opt/bitnami/scripts/redis-cluster/postunpack.sh \
+    && grep -Fq 'tls-expected-peer-name' /opt/bitnami/redis/etc/redis-default.conf \
+    && grep -Eq '^cluster-enabled[[:space:]]+yes$' /opt/bitnami/redis/etc.default/redis.conf \
     && chown -R 1001:1001 /opt/bitnami/redis /bitnami/redis \
     && chmod -R g+rwX /opt/bitnami /bitnami/redis \
     && find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
