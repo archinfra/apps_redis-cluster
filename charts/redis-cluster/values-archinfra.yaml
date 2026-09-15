@@ -1,0 +1,85 @@
+# Archinfra production defaults layered on top of the forked Bitnami values.yaml.
+# Keep product-specific defaults here so upstream template/value changes remain reviewable.
+
+global:
+  defaultStorageClass: nfs
+  security:
+    # The image is built by archinfra rather than published by Bitnami, so the
+    # Bitnami common-library image allowlist must not reject it.
+    allowInsecureImages: true
+
+image:
+  registry: sealos.hub:5000
+  repository: kube4/redis-cluster
+  tag: 8.10.1-r1
+  pullPolicy: IfNotPresent
+
+cluster:
+  init: true
+  nodes: 6
+  replicas: 1
+  externalAccess:
+    enabled: false
+
+persistence:
+  enabled: true
+  storageClass: nfs
+  size: 10Gi
+
+networkPolicy:
+  enabled: true
+  # Compatibility default for existing consumers. A later hardening change will
+  # expose explicit permissive/restricted policy modes through the installer.
+  allowExternal: true
+  allowExternalEgress: true
+
+redis:
+  useAOFPersistence: "yes"
+  podManagementPolicy: Parallel
+  resourcesPreset: none
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+metrics:
+  enabled: true
+  image:
+    registry: sealos.hub:5000
+    repository: kube4/redis-exporter
+    tag: 1.89.0-r1
+    pullPolicy: IfNotPresent
+  resourcesPreset: none
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  serviceMonitor:
+    enabled: true
+    labels:
+      monitoring.archinfra.io/stack: default
+  prometheusRule:
+    enabled: true
+    additionalLabels:
+      monitoring.archinfra.io/stack: default
+
+volumePermissions:
+  enabled: false
+  image:
+    registry: sealos.hub:5000
+    repository: kube4/os-shell
+    tag: 1.37.0-glibc
+    pullPolicy: IfNotPresent
+
+sysctlImage:
+  image:
+    registry: sealos.hub:5000
+    repository: kube4/os-shell
+    tag: 1.37.0-glibc
+    pullPolicy: IfNotPresent
