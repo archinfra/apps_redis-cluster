@@ -73,10 +73,23 @@ jobs:
         run: |
           image="archinfra-payload/redis-cluster:8.10.1-r1-${{ matrix.arch }}"
           docker run --rm --entrypoint /bin/bash "$image" -ec '
+            test "$(id -u)" = "1001"
+            test "$HOME" = "/"
+            test "$OS_FLAVOUR" = "debian-12"
+            test "$OS_NAME" = "linux"
             test -x /opt/bitnami/scripts/redis-cluster/entrypoint.sh
             test -x /opt/bitnami/scripts/redis-cluster/run.sh
             test -x /usr/local/bin/wait-for-port
             /opt/bitnami/redis/bin/redis-server --version | grep -F "v=8.10.1"
+            /opt/bitnami/redis/bin/redis-cli --version | grep -F "8.10.1"
+            ! ldd /opt/bitnami/redis/bin/redis-server | grep -F "not found"
+            ! ldd /opt/bitnami/redis/bin/redis-cli | grep -F "not found"
+            password_file="$(mktemp)"
+            printf "%s" "file-secret-contract" > "$password_file"
+            export REDIS_PASSWORD_FILE="$password_file"
+            . /opt/bitnami/scripts/redis-cluster-env.sh
+            test "$REDIS_PASSWORD" = "file-secret-contract"
+            rm -f "$password_file"
           '
 
       - name: Verify installer checksum
