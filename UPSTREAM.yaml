@@ -12,7 +12,9 @@ runtime:
   strategy: archinfra-owned-compatible-runtime
   redis:
     version: 8.10.1
-    baseImage: redis:8.10.1-bookworm
+    sourceRepository: https://github.com/redis/redis
+    sourceRef: 3399357e7c17b668289386b8a15a3037bc4527b1
+    buildBase: debian:bookworm-slim
   compatibilityLayer:
     sourceRepository: https://github.com/bitnami/containers/tree/main/bitnami/redis-cluster
     sourceRef: 31d7973ac4a12f31662cf06c0e636d858e984184
@@ -37,6 +39,7 @@ maintenance:
   strategy: fork-and-maintain
   rules:
     - Track Bitnami chart changes as an upstream reference, not as a runtime dependency.
+    - Build Redis from a pinned upstream source commit for every production runtime image.
     - Redis security releases are evaluated independently from the original Bitnami chart appVersion.
     - Production images must be buildable by archinfra CI for amd64 and arm64.
     - No Bitnami Secure Images or bitnamilegacy images are required for the Redis data plane.
