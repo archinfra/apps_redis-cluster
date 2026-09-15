@@ -1,13 +1,15 @@
 component: redis-cluster
 
 redis:
-  version: 8.2.7
+  version: 8.2.1
 
 chart:
   version: 13.0.5
+  source: bitnami/redis-cluster
 
 redisExporter:
   version: 1.76.0
 
+runtimeContract: bitnami-redis-cluster-runtime
 maintainer: archinfra
 profile: production
