@@ -57,6 +57,7 @@ COPY --from=redis-builder /opt/redis-dist/bin/ /opt/bitnami/redis/bin/
 # Transitional compatibility layer derived from the public Bitnami source.
 COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/debian-12/prebuildfs/ /
 COPY --from=bitnami-source /src/bitnami-containers/bitnami/redis-cluster/8.10/debian-12/rootfs/ /
+COPY wait-for-port /usr/local/bin/wait-for-port
 
 RUN mkdir -p \
       /opt/bitnami/redis/etc \
@@ -64,6 +65,7 @@ RUN mkdir -p \
       /opt/bitnami/redis/logs \
       /opt/bitnami/redis/tmp \
       /bitnami/redis/data \
+    && chmod 0755 /usr/local/bin/wait-for-port \
     && for bin in /opt/bitnami/redis/bin/redis-*; do \
          ln -sf "${bin}" "/usr/local/bin/$(basename "${bin}")"; \
        done \
