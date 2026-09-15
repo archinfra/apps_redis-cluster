@@ -33,18 +33,23 @@ for marker in required_upstream_markers:
         raise SystemExit(f"UPSTREAM.yaml mismatch: missing {marker!r}")
 
 # Transitional compatibility contract: the chart still invokes these paths while
-# the data-plane image is now built and owned by archinfra.
+# the Redis binary and final runtime image are now built by archinfra.
 if "/opt/bitnami/scripts/redis-cluster/entrypoint.sh" not in statefulset:
     raise SystemExit("unexpected runtime contract: redis-cluster entrypoint path changed")
 
 runtime_markers = [
-    "FROM redis:8.10.1-bookworm",
+    "REDIS_VERSION=8.10.1",
+    "REDIS_COMMIT=3399357e7c17b668289386b8a15a3037bc4527b1",
+    "FROM debian:bookworm-slim",
     "31d7973ac4a12f31662cf06c0e636d858e984184",
     "/opt/bitnami/scripts/redis-cluster/entrypoint.sh",
 ]
 for marker in runtime_markers:
     if marker not in runtime_dockerfile:
         raise SystemExit(f"runtime image contract mismatch: missing {marker!r}")
+
+if "FROM redis:" in runtime_dockerfile:
+    raise SystemExit("runtime must build Redis from pinned source, not inherit an external Redis runtime image")
 
 if "oliver006/redis_exporter:v1.89.0" not in exporter_dockerfile:
     raise SystemExit("redis exporter baseline must be v1.89.0")
