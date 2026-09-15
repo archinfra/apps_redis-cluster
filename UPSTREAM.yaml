@@ -1,0 +1,33 @@
+chart:
+  name: redis-cluster
+  source: oci://registry-1.docker.io/bitnamicharts/redis-cluster
+  sourceRepository: https://github.com/bitnami/charts/tree/main/bitnami/redis-cluster
+  version: 13.0.5
+  appVersion: 8.2.1
+  ownership: upstream
+
+adapter:
+  owner: archinfra
+  strategy: upstream-chart-with-overlay
+  contract: bitnami-redis-cluster-runtime
+  allowedChartOverrides:
+    - values.yaml
+    - templates/grafana-dashboard.yaml
+
+images:
+  redisCluster:
+    contract: bitnami-redis-cluster-runtime
+    version: 8.2.1-debian-12-r0
+    upstream: docker.io/bitnamilegacy/redis-cluster:8.2.1-debian-12-r0
+  redisExporter:
+    version: 1.76.0-debian-12-r0
+    upstream: docker.io/bitnamilegacy/redis-exporter:1.76.0-debian-12-r0
+  osShell:
+    version: 12-debian-12-r51
+    upstream: docker.io/bitnamilegacy/os-shell:12-debian-12-r51
+
+notes:
+  - The Bitnami chart is the topology/runtime owner; archinfra does not reimplement Redis Cluster orchestration.
+  - Never substitute docker.io/library/redis directly for the Bitnami redis-cluster image contract.
+  - Bitnami legacy images are a compatibility baseline only and must be mirrored into the delivery registry.
+  - A future Redis upgrade must either use a Bitnami-compatible secure image or a separately validated compatible image before changing this BOM.
