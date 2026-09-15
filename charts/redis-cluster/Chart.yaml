@@ -1,35 +1,39 @@
+# Derived from Bitnami redis-cluster chart 13.0.5.
+# Original work Copyright Broadcom, Inc. All Rights Reserved.
+# SPDX-License-Identifier: APACHE-2.0
+
 annotations:
-  category: Database
   images: |
     - name: os-shell
-      image: sealos.hub:5000/kube4/os-shell:12-debian-12-r51
+      image: docker.io/library/busybox:1.37.0-glibc
     - name: redis-cluster
-      image: sealos.hub:5000/kube4/redis-cluster:8.2.7-debian-12-r0
+      image: archinfra/redis-cluster:8.10.1-r1
     - name: redis-exporter
-      image: sealos.hub:5000/kube4/redis-exporter:1.76.0-debian-12-r0
+      image: archinfra/redis-exporter:1.89.0-r1
   licenses: Apache-2.0
-  tanzuCategory: service
+  archinfra.io/upstream-chart: bitnami/redis-cluster@13.0.5
+  archinfra.io/upstream-ref: e07d3319b61f49ddf6f431da3ed7ec0e0be3d5d0
 apiVersion: v2
-appVersion: 8.2.7
+appVersion: 8.10.1
 dependencies:
 - name: common
   repository: oci://registry-1.docker.io/bitnamicharts
   tags:
   - bitnami-common
   version: 2.x.x
-description: Redis(R) is an open source, scalable, distributed in-memory cache for
-  applications. It can be used to store and serve data in the form of strings, hashes,
-  lists, sets and sorted sets.
-home: https://bitnami.com
-icon: https://dyltqmyl993wv.cloudfront.net/assets/stacks/redis/img/redis-stack-220x234.png
+description: Archinfra Redis Cluster chart, derived from Bitnami redis-cluster and maintained for offline production delivery.
+home: https://github.com/archinfra/apps_redis-cluster
 keywords:
 - redis
 - keyvalue
 - database
+- cluster
+- archinfra
 maintainers:
-- name: Broadcom, Inc. All Rights Reserved.
-  url: https://github.com/bitnami/charts
+- name: archinfra
+  url: https://github.com/archinfra
 name: redis-cluster
 sources:
+- https://github.com/archinfra/apps_redis-cluster
 - https://github.com/bitnami/charts/tree/main/bitnami/redis-cluster
-version: 13.0.5
+version: 13.0.5-archinfra.1

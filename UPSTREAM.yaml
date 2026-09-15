@@ -1,0 +1,46 @@
+chart:
+  name: redis-cluster
+  upstreamRepository: https://github.com/bitnami/charts/tree/main/bitnami/redis-cluster
+  upstreamVersion: 13.0.5
+  upstreamRef: e07d3319b61f49ddf6f431da3ed7ec0e0be3d5d0
+  forkVersion: 13.0.5-archinfra.1
+  appVersion: 8.10.1
+  ownership: archinfra-fork
+  license: Apache-2.0
+
+runtime:
+  strategy: archinfra-owned-compatible-runtime
+  redis:
+    version: 8.10.1
+    sourceRepository: https://github.com/redis/redis
+    sourceRef: 3399357e7c17b668289386b8a15a3037bc4527b1
+    buildBase: debian:bookworm-slim
+  compatibilityLayer:
+    sourceRepository: https://github.com/bitnami/containers/tree/main/bitnami/redis-cluster
+    sourceRef: 31d7973ac4a12f31662cf06c0e636d858e984184
+    upstreamVersion: 8.10.1-debian-12-r1
+    license: Apache-2.0
+    contract: bitnami-redis-cluster-runtime-v1
+    note: Transitional compatibility layer; progressively replace /opt/bitnami runtime scripts with archinfra-owned bootstrap logic.
+
+images:
+  redisCluster:
+    source: build:runtime/redis-cluster
+    version: 8.10.1-r1
+  redisExporter:
+    source: build:runtime/redis-exporter
+    upstream: oliver006/redis_exporter:v1.89.0
+    version: 1.89.0-r1
+  helper:
+    upstream: docker.io/library/busybox:1.37.0-glibc
+    version: 1.37.0-glibc
+
+maintenance:
+  strategy: fork-and-maintain
+  rules:
+    - Track Bitnami chart changes as an upstream reference, not as a runtime dependency.
+    - Build Redis from a pinned upstream source commit for every production runtime image.
+    - Redis security releases are evaluated independently from the original Bitnami chart appVersion.
+    - Production images must be buildable by archinfra CI for amd64 and arm64.
+    - No Bitnami Secure Images or bitnamilegacy images are required for the Redis data plane.
+    - Preserve Apache-2.0 notices for code derived from Bitnami.

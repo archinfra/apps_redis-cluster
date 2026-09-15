@@ -1,13 +1,34 @@
 component: redis-cluster
 
+distribution:
+  version: 13.0.5-archinfra.1
+
+installer:
+  version: 0.1.7
+  auth: kubernetes-secret-file
+
 redis:
-  version: 8.2.7
+  version: 8.10.1
+  runtimeRevision: r1
 
 chart:
-  version: 13.0.5
+  version: 13.0.5-archinfra.1
+  upstream: bitnami/redis-cluster
+  upstreamVersion: 13.0.5
 
 redisExporter:
-  version: 1.76.0
+  version: 1.89.0
+  runtimeRevision: r1
 
+monitoring:
+  schema: v2
+  dashboards: 2
+  sourceOfTruth: charts/redis-cluster/values-archinfra.yaml
+
+helper:
+  image: busybox
+  version: 1.37.0-glibc
+
+runtimeContract: bitnami-redis-cluster-runtime-v1
 maintainer: archinfra
 profile: production

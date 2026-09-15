@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
+umask 077
 
 APP_NAME="redis-cluster"
-APP_VERSION="0.1.6"
+APP_VERSION="0.1.7"
 PACKAGE_PROFILE="integrated"
 WORKDIR="/tmp/${APP_NAME}-installer"
 PAYLOAD_ARCHIVE="${WORKDIR}/payload.tar.gz"
@@ -12,12 +13,15 @@ IMAGE_DIR="${WORKDIR}/images"
 IMAGE_INDEX="${IMAGE_DIR}/image-index.tsv"
 
 ACTION="help"
-HELP_TOPIC="overview"
 RELEASE_NAME="redis-cluster"
 NAMESPACE="aict"
 NODES="6"
 REPLICAS="1"
-REDIS_PASSWORD="Redis@Passw0rd"
+REDIS_PASSWORD=""
+REDIS_PASSWORD_FILE=""
+REDIS_SECRET_NAME=""
+REDIS_SECRET_KEY="redis-password"
+ROTATE_PASSWORD="false"
 STORAGE_CLASS="nfs"
 STORAGE_SIZE="10Gi"
 RESOURCE_PROFILE="mid"
@@ -29,13 +33,16 @@ IMAGE_PULL_POLICY="IfNotPresent"
 WAIT_TIMEOUT="10m"
 REGISTRY_REPO="sealos.hub:5000/kube4"
 REGISTRY_REPO_EXPLICIT="false"
-REGISTRY_USER="admin"
-REGISTRY_PASS="passw0rd"
+REGISTRY_USER=""
+REGISTRY_PASS=""
+REGISTRY_PASS_FILE=""
 SKIP_IMAGE_PREPARE="false"
 DELETE_PVC="false"
 AUTO_YES="false"
+SECRET_IS_EXTERNAL="false"
 
 HELM_ARGS=()
+RESOURCE_HELM_ARGS=()
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,22 +52,10 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-log() {
-  echo -e "${CYAN}[INFO]${NC} $*"
-}
-
-success() {
-  echo -e "${GREEN}[OK]${NC} $*"
-}
-
-warn() {
-  echo -e "${YELLOW}[WARN]${NC} $*" >&2
-}
-
-die() {
-  echo -e "${RED}[ERROR]${NC} $*" >&2
-  exit 1
-}
+log() { echo -e "${CYAN}[INFO]${NC} $*"; }
+success() { echo -e "${GREEN}[OK]${NC} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
+die() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 section() {
   echo
@@ -69,9 +64,7 @@ section() {
   echo -e "${BLUE}${BOLD}============================================================${NC}"
 }
 
-program_name() {
-  basename "$0"
-}
+program_name() { basename "$0"; }
 
 banner() {
   echo
@@ -98,10 +91,20 @@ Core options:
   --release-name <name>                Helm release name, default: ${RELEASE_NAME}
   --nodes <num>                        Total Redis cluster nodes, default: ${NODES}
   --replicas <num>                     Replicas per master, default: ${REPLICAS}
-  --password <pwd>                     Redis password, default: ${REDIS_PASSWORD}
   --storage-class <name>               StorageClass, default: ${STORAGE_CLASS}
   --storage-size <size>                PVC size, default: ${STORAGE_SIZE}
   --resource-profile <name>            Resource profile: low|mid|midd|high, default: ${RESOURCE_PROFILE}
+
+Authentication:
+  --existing-secret <name>             Use an existing Kubernetes Secret; installer will not modify it
+  --secret-key <key>                   Password key in the Secret, default: ${REDIS_SECRET_KEY}
+  --password-file <path>               Seed a new/rotated managed Secret from a local file (recommended)
+  --password <pwd>                     Compatibility option; seeds the Secret but may remain in shell history
+  --rotate-password                    Replace the managed Secret password; generates one if no password input is given
+
+  If no existing Secret/password is supplied, the installer creates ${RELEASE_NAME}-auth
+  with a cryptographically random password. Existing managed Secrets are reused on upgrade.
+  Passwords are never passed to Helm and are never printed by this installer.
 
 Monitoring:
   --enable-metrics                     Enable redis-exporter sidecar and metrics service
@@ -114,8 +117,9 @@ Monitoring:
 
 Image and rollout:
   --registry <repo-prefix>             Target image repo prefix, default: ${REGISTRY_REPO}
-  --registry-user <user>               Registry username, default: ${REGISTRY_USER}
-  --registry-password <password>       Registry password, default: <hidden>
+  --registry-user <user>               Optional registry username; omitted means reuse Docker credential config
+  --registry-password-file <path>      Registry password file (recommended with --registry-user)
+  --registry-password <password>       Compatibility option; may remain in shell history
   --image-pull-policy <policy>         Always|IfNotPresent|Never, default: ${IMAGE_PULL_POLICY}
   --skip-image-prepare                 Reuse images that already exist in the target registry
   --wait-timeout <duration>            Helm wait timeout, default: ${WAIT_TIMEOUT}
@@ -126,10 +130,11 @@ Other:
   -h, --help                           Show help
 
 Examples:
-  ${cmd} install --storage-class nfs --password 'Redis@123' -y
-  ${cmd} install --resource-profile high --storage-class nfs -y
-  ${cmd} install --enable-metrics --enable-servicemonitor --storage-class nfs -y
-  ${cmd} install --registry harbor.example.com/kube4 --skip-image-prepare -y
+  ${cmd} install --storage-class nfs -y
+  ${cmd} install --existing-secret redis-prod-auth --secret-key redis-password -y
+  ${cmd} install --password-file /secure/redis.password --resource-profile high -y
+  ${cmd} install --registry harbor.example.com/kube4 --registry-user robot --registry-password-file /secure/harbor.password -y
+  ${cmd} install --skip-image-prepare -y
   ${cmd} status -n aict
   ${cmd} uninstall --delete-pvc -y
 EOF
@@ -138,7 +143,6 @@ EOF
 cleanup() {
   rm -rf "${WORKDIR}"
 }
-
 trap cleanup EXIT
 
 parse_args() {
@@ -150,126 +154,68 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       install|uninstall|status|help)
-        ACTION="$1"
-        shift
-        ;;
+        ACTION="$1"; shift ;;
       -n|--namespace)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        NAMESPACE="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; NAMESPACE="$2"; shift 2 ;;
       --release-name)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        RELEASE_NAME="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; RELEASE_NAME="$2"; shift 2 ;;
       --nodes)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        NODES="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; NODES="$2"; shift 2 ;;
       --replicas)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        REPLICAS="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REPLICAS="$2"; shift 2 ;;
       --password)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        REDIS_PASSWORD="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REDIS_PASSWORD="$2"; shift 2 ;;
+      --password-file)
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REDIS_PASSWORD_FILE="$2"; shift 2 ;;
+      --existing-secret)
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REDIS_SECRET_NAME="$2"; SECRET_IS_EXTERNAL="true"; shift 2 ;;
+      --secret-key)
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REDIS_SECRET_KEY="$2"; shift 2 ;;
+      --rotate-password)
+        ROTATE_PASSWORD="true"; shift ;;
       --storage-class)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        STORAGE_CLASS="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; STORAGE_CLASS="$2"; shift 2 ;;
       --storage-size)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        STORAGE_SIZE="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; STORAGE_SIZE="$2"; shift 2 ;;
       --resource-profile)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        RESOURCE_PROFILE="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; RESOURCE_PROFILE="$2"; shift 2 ;;
       --enable-metrics)
-        ENABLE_METRICS="true"
-        shift
-        ;;
+        ENABLE_METRICS="true"; shift ;;
       --disable-metrics)
-        ENABLE_METRICS="false"
-        shift
-        ;;
+        ENABLE_METRICS="false"; shift ;;
       --enable-servicemonitor)
-        ENABLE_SERVICEMONITOR="true"
-        shift
-        ;;
+        ENABLE_SERVICEMONITOR="true"; shift ;;
       --disable-servicemonitor)
-        ENABLE_SERVICEMONITOR="false"
-        shift
-        ;;
+        ENABLE_SERVICEMONITOR="false"; shift ;;
       --enable-prometheusrule)
-        ENABLE_PROMETHEUSRULE="true"
-        shift
-        ;;
+        ENABLE_PROMETHEUSRULE="true"; shift ;;
       --disable-prometheusrule)
-        ENABLE_PROMETHEUSRULE="false"
-        shift
-        ;;
+        ENABLE_PROMETHEUSRULE="false"; shift ;;
       --service-monitor-namespace)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        SERVICE_MONITOR_NAMESPACE="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; SERVICE_MONITOR_NAMESPACE="$2"; shift 2 ;;
       --registry)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        REGISTRY_REPO="$2"
-        REGISTRY_REPO_EXPLICIT="true"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REGISTRY_REPO="$2"; REGISTRY_REPO_EXPLICIT="true"; shift 2 ;;
       --registry-user)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        REGISTRY_USER="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REGISTRY_USER="$2"; shift 2 ;;
       --registry-password)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        REGISTRY_PASS="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REGISTRY_PASS="$2"; shift 2 ;;
+      --registry-password-file)
+        [[ $# -ge 2 ]] || die "Missing value for $1"; REGISTRY_PASS_FILE="$2"; shift 2 ;;
       --image-pull-policy)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        IMAGE_PULL_POLICY="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; IMAGE_PULL_POLICY="$2"; shift 2 ;;
       --skip-image-prepare)
-        SKIP_IMAGE_PREPARE="true"
-        shift
-        ;;
+        SKIP_IMAGE_PREPARE="true"; shift ;;
       --wait-timeout)
-        [[ $# -ge 2 ]] || die "Missing value for $1"
-        WAIT_TIMEOUT="$2"
-        shift 2
-        ;;
+        [[ $# -ge 2 ]] || die "Missing value for $1"; WAIT_TIMEOUT="$2"; shift 2 ;;
       --delete-pvc)
-        DELETE_PVC="true"
-        shift
-        ;;
+        DELETE_PVC="true"; shift ;;
       -y|--yes)
-        AUTO_YES="true"
-        shift
-        ;;
+        AUTO_YES="true"; shift ;;
       -h|--help)
-        ACTION="help"
-        shift
-        ;;
+        ACTION="help"; shift ;;
       --)
         shift
-        while [[ $# -gt 0 ]]; do
-          HELM_ARGS+=("$1")
-          shift
-        done
+        while [[ $# -gt 0 ]]; do HELM_ARGS+=("$1"); shift; done
         break
         ;;
       *)
@@ -282,34 +228,59 @@ parse_args() {
 normalize_flags() {
   case "${IMAGE_PULL_POLICY}" in
     Always|IfNotPresent|Never) ;;
-    *)
-      die "Unsupported image pull policy: ${IMAGE_PULL_POLICY}"
-      ;;
+    *) die "Unsupported image pull policy: ${IMAGE_PULL_POLICY}" ;;
   esac
 
-  if [[ "${ENABLE_SERVICEMONITOR}" == "true" ]]; then
+  [[ "${NODES}" =~ ^[0-9]+$ ]] || die "--nodes must be an integer"
+  [[ "${REPLICAS}" =~ ^[0-9]+$ ]] || die "--replicas must be an integer"
+  (( REPLICAS >= 0 )) || die "--replicas must be >= 0"
+  local group_size=$((REPLICAS + 1))
+  (( NODES % group_size == 0 )) || die "nodes must be divisible by replicas+1 (${group_size})"
+  (( NODES / group_size >= 3 )) || die "Redis Cluster requires at least 3 masters"
+
+  if [[ "${ENABLE_SERVICEMONITOR}" == "true" || "${ENABLE_PROMETHEUSRULE}" == "true" ]]; then
     ENABLE_METRICS="true"
   fi
 
   case "${RESOURCE_PROFILE,,}" in
-    low)
-      RESOURCE_PROFILE="low"
-      ;;
-    mid|midd|middle|medium)
-      RESOURCE_PROFILE="mid"
-      ;;
-    high)
-      RESOURCE_PROFILE="high"
-      ;;
-    *)
-      die "Unsupported resource profile: ${RESOURCE_PROFILE}. Expected low|mid|midd|high"
-      ;;
+    low) RESOURCE_PROFILE="low" ;;
+    mid|midd|middle|medium) RESOURCE_PROFILE="mid" ;;
+    high) RESOURCE_PROFILE="high" ;;
+    *) die "Unsupported resource profile: ${RESOURCE_PROFILE}. Expected low|mid|midd|high" ;;
   esac
+
+  [[ -z "${REDIS_PASSWORD}" || -z "${REDIS_PASSWORD_FILE}" ]] || die "Use only one of --password or --password-file"
+  if [[ "${SECRET_IS_EXTERNAL}" == "true" ]]; then
+    [[ -z "${REDIS_PASSWORD}" && -z "${REDIS_PASSWORD_FILE}" ]] || die "--existing-secret cannot be combined with password input"
+    [[ "${ROTATE_PASSWORD}" == "false" ]] || die "--rotate-password cannot modify --existing-secret"
+  elif [[ -z "${REDIS_SECRET_NAME}" ]]; then
+    REDIS_SECRET_NAME="${RELEASE_NAME}-auth"
+  fi
+
+  [[ -z "${REGISTRY_PASS}" || -z "${REGISTRY_PASS_FILE}" ]] || die "Use only one of --registry-password or --registry-password-file"
+  if [[ -n "${REGISTRY_PASS_FILE}" ]]; then
+    [[ -r "${REGISTRY_PASS_FILE}" ]] || die "Registry password file is not readable: ${REGISTRY_PASS_FILE}"
+  fi
+  if [[ -n "${REGISTRY_USER}" && -z "${REGISTRY_PASS}" && -z "${REGISTRY_PASS_FILE}" ]]; then
+    die "--registry-user requires --registry-password-file or --registry-password"
+  fi
+  if [[ -z "${REGISTRY_USER}" && ( -n "${REGISTRY_PASS}" || -n "${REGISTRY_PASS_FILE}" ) ]]; then
+    die "Registry password requires --registry-user"
+  fi
+
+  local arg lower
+  for arg in "${HELM_ARGS[@]}"; do
+    lower="${arg,,}"
+    if [[ "${lower}" == *"password="* || "${lower}" == *"global.redis.password"* ]]; then
+      die "Do not pass Redis passwords through Helm extra args; use --existing-secret or --password-file"
+    fi
+  done
 }
 
 check_deps() {
   command -v helm >/dev/null 2>&1 || die "helm is required"
   command -v kubectl >/dev/null 2>&1 || die "kubectl is required"
+  command -v base64 >/dev/null 2>&1 || die "base64 is required"
   if [[ "${ACTION}" == "install" && "${SKIP_IMAGE_PREPARE}" != "true" ]]; then
     command -v docker >/dev/null 2>&1 || die "docker is required unless --skip-image-prepare is used"
   fi
@@ -325,11 +296,15 @@ confirm() {
   if [[ "${ACTION}" == "install" ]]; then
     echo "Nodes                   : ${NODES}"
     echo "Replicas per master     : ${REPLICAS}"
+    echo "Auth Secret             : ${REDIS_SECRET_NAME}"
+    echo "Auth Secret key         : ${REDIS_SECRET_KEY}"
+    echo "Rotate password         : ${ROTATE_PASSWORD}"
     echo "StorageClass            : ${STORAGE_CLASS}"
     echo "Storage size            : ${STORAGE_SIZE}"
     echo "Resource profile        : ${RESOURCE_PROFILE}"
     echo "Metrics                 : ${ENABLE_METRICS}"
     echo "ServiceMonitor          : ${ENABLE_SERVICEMONITOR}"
+    echo "PrometheusRule          : ${ENABLE_PROMETHEUSRULE}"
     echo "Registry repo           : ${REGISTRY_REPO}"
     echo "Skip image prepare      : ${SKIP_IMAGE_PREPARE}"
     echo "Wait timeout            : ${WAIT_TIMEOUT}"
@@ -349,53 +324,22 @@ extract_payload() {
   log "Extracting embedded payload to ${WORKDIR}"
   rm -rf "${WORKDIR}"
   mkdir -p "${WORKDIR}"
-
   local payload_line
   payload_line="$(awk '/^__PAYLOAD_BELOW__$/ {print NR + 1; exit}' "$0")"
   [[ -n "${payload_line}" ]] || die "Unable to locate embedded payload"
-
   tail -n +"${payload_line}" "$0" > "${PAYLOAD_ARCHIVE}"
   tar -xzf "${PAYLOAD_ARCHIVE}" -C "${WORKDIR}"
-
   [[ -d "${CHART_DIR}" ]] || die "Missing chart payload"
+  [[ -f "${CHART_DIR}/values-archinfra.yaml" ]] || die "Missing archinfra values payload"
   [[ -f "${IMAGE_INDEX}" ]] || die "Missing image metadata payload"
 }
 
-image_name_from_ref() {
-  local ref="$1"
-  local name_tag="${ref##*/}"
-  echo "${name_tag%%:*}"
-}
-
-image_name_tag_from_ref() {
-  local ref="$1"
-  echo "${ref##*/}"
-}
-
-resolve_target_ref() {
-  local default_ref="$1"
-  if [[ "${REGISTRY_REPO_EXPLICIT}" == "true" ]]; then
-    echo "${REGISTRY_REPO}/$(image_name_tag_from_ref "${default_ref}")"
-  else
-    echo "${default_ref}"
-  fi
-}
-
-image_registry_from_ref() {
-  local ref="$1"
-  echo "${ref%%/*}"
-}
-
-image_repository_from_ref() {
-  local ref="$1"
-  local remainder="${ref#*/}"
-  echo "${remainder%:*}"
-}
-
-image_tag_from_ref() {
-  local ref="$1"
-  echo "${ref##*:}"
-}
+image_name_from_ref() { local ref="$1"; local name_tag="${ref##*/}"; echo "${name_tag%%:*}"; }
+image_name_tag_from_ref() { local ref="$1"; echo "${ref##*/}"; }
+resolve_target_ref() { local ref="$1"; [[ "${REGISTRY_REPO_EXPLICIT}" == "true" ]] && echo "${REGISTRY_REPO}/$(image_name_tag_from_ref "${ref}")" || echo "${ref}"; }
+image_registry_from_ref() { local ref="$1"; echo "${ref%%/*}"; }
+image_repository_from_ref() { local ref="$1"; local remainder="${ref#*/}"; echo "${remainder%:*}"; }
+image_tag_from_ref() { local ref="$1"; echo "${ref##*:}"; }
 
 declare -A IMAGE_DEFAULT_TARGETS=()
 declare -A IMAGE_EFFECTIVE_TARGETS=()
@@ -411,8 +355,7 @@ load_image_metadata() {
 }
 
 find_image_ref_by_name() {
-  local wanted_name="$1"
-  local tar_name
+  local wanted_name="$1" tar_name
   for tar_name in "${!IMAGE_EFFECTIVE_TARGETS[@]}"; do
     if [[ "$(image_name_from_ref "${IMAGE_EFFECTIVE_TARGETS[${tar_name}]}")" == "${wanted_name}" ]]; then
       echo "${IMAGE_EFFECTIVE_TARGETS[${tar_name}]}"
@@ -423,41 +366,41 @@ find_image_ref_by_name() {
 }
 
 docker_login() {
-  local registry_host="${REGISTRY_REPO%%/*}"
-  log "Logging into registry ${registry_host}"
-  if ! echo "${REGISTRY_PASS}" | docker login "${registry_host}" -u "${REGISTRY_USER}" --password-stdin >/dev/null 2>&1; then
-    warn "docker login failed for ${registry_host}; continuing and letting push decide"
+  local registry_host="${REGISTRY_REPO%%/*}" password=""
+  if [[ -z "${REGISTRY_USER}" ]]; then
+    log "Using existing Docker credentials for ${registry_host}"
+    return 0
   fi
+  if [[ -n "${REGISTRY_PASS_FILE}" ]]; then
+    password="$(cat "${REGISTRY_PASS_FILE}")"
+  else
+    password="${REGISTRY_PASS}"
+  fi
+  log "Logging into registry ${registry_host}"
+  if ! printf '%s' "${password}" | docker login "${registry_host}" -u "${REGISTRY_USER}" --password-stdin >/dev/null 2>&1; then
+    die "docker login failed for ${registry_host}"
+  fi
+  unset password
 }
 
 prepare_images() {
-  [[ "${SKIP_IMAGE_PREPARE}" == "true" ]] && {
-    log "Skipping image prepare because --skip-image-prepare was requested"
-    return 0
-  }
-
+  [[ "${SKIP_IMAGE_PREPARE}" == "true" ]] && { log "Skipping image prepare"; return 0; }
   docker_login
-
   local tar_name load_ref default_target_ref target_ref tar_path
   while IFS=$'\t' read -r tar_name load_ref default_target_ref; do
     [[ -n "${tar_name}" ]] || continue
     tar_path="${IMAGE_DIR}/${tar_name}"
     [[ -f "${tar_path}" ]] || die "Missing image tar: ${tar_path}"
-
     target_ref="${IMAGE_EFFECTIVE_TARGETS[${tar_name}]}"
-
     log "Loading ${tar_name}"
     docker load -i "${tar_path}" >/dev/null
-
     if [[ "${load_ref}" != "${target_ref}" ]]; then
       log "Tagging ${load_ref} -> ${target_ref}"
       docker tag "${load_ref}" "${target_ref}"
     fi
-
     log "Pushing ${target_ref}"
     docker push "${target_ref}"
   done < "${IMAGE_INDEX}"
-
   success "Image prepare completed"
 }
 
@@ -468,33 +411,96 @@ ensure_namespace() {
   fi
 }
 
-check_servicemonitor_support() {
-  if [[ "${ENABLE_SERVICEMONITOR}" != "true" ]]; then
+secret_has_key() {
+  local name="$1" key="$2" value
+  value="$(kubectl get secret "${name}" -n "${NAMESPACE}" -o "go-template={{ index .data \"${key}\" }}" 2>/dev/null || true)"
+  [[ -n "${value}" ]]
+}
+
+generate_password_file() {
+  local output="$1" raw=""
+  while (( ${#raw} < 48 )); do
+    raw+="$(head -c 48 /dev/urandom | base64 | tr -d '\n=+/')"
+  done
+  printf '%s' "${raw:0:48}" > "${output}"
+  chmod 0600 "${output}"
+}
+
+prepare_password_file() {
+  local output="$1"
+  if [[ -n "${REDIS_PASSWORD_FILE}" ]]; then
+    [[ -r "${REDIS_PASSWORD_FILE}" ]] || die "Password file is not readable: ${REDIS_PASSWORD_FILE}"
+    cat "${REDIS_PASSWORD_FILE}" > "${output}"
+  elif [[ -n "${REDIS_PASSWORD}" ]]; then
+    printf '%s' "${REDIS_PASSWORD}" > "${output}"
+  else
+    generate_password_file "${output}"
+  fi
+  [[ -s "${output}" ]] || die "Redis password must not be empty"
+  chmod 0600 "${output}"
+}
+
+ensure_redis_secret() {
+  ensure_namespace
+
+  if [[ "${SECRET_IS_EXTERNAL}" == "true" ]]; then
+    kubectl get secret "${REDIS_SECRET_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1 || die "Existing Secret not found: ${NAMESPACE}/${REDIS_SECRET_NAME}"
+    secret_has_key "${REDIS_SECRET_NAME}" "${REDIS_SECRET_KEY}" || die "Secret ${REDIS_SECRET_NAME} does not contain key ${REDIS_SECRET_KEY}"
+    success "Using existing Redis authentication Secret ${REDIS_SECRET_NAME}"
     return 0
   fi
 
+  if kubectl get secret "${REDIS_SECRET_NAME}" -n "${NAMESPACE}" >/dev/null 2>&1 && [[ "${ROTATE_PASSWORD}" != "true" ]]; then
+    secret_has_key "${REDIS_SECRET_NAME}" "${REDIS_SECRET_KEY}" || die "Managed Secret ${REDIS_SECRET_NAME} is missing key ${REDIS_SECRET_KEY}; repair it or use --rotate-password"
+    success "Reusing Redis authentication Secret ${REDIS_SECRET_NAME}"
+    return 0
+  fi
+
+  local password_file="${WORKDIR}/.redis-password"
+  prepare_password_file "${password_file}"
+  kubectl create secret generic "${REDIS_SECRET_NAME}" \
+    -n "${NAMESPACE}" \
+    --from-file="${REDIS_SECRET_KEY}=${password_file}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  rm -f "${password_file}"
+  REDIS_PASSWORD=""
+  kubectl label secret "${REDIS_SECRET_NAME}" -n "${NAMESPACE}" \
+    app.kubernetes.io/managed-by=archinfra \
+    app.kubernetes.io/instance="${RELEASE_NAME}" \
+    app.kubernetes.io/name=redis-cluster \
+    --overwrite >/dev/null
+  if [[ "${ROTATE_PASSWORD}" == "true" ]]; then
+    success "Rotated Redis authentication Secret ${REDIS_SECRET_NAME}"
+  else
+    success "Created Redis authentication Secret ${REDIS_SECRET_NAME}"
+  fi
+}
+
+check_servicemonitor_support() {
+  [[ "${ENABLE_SERVICEMONITOR}" == "true" ]] || return 0
   if ! kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
-    warn "ServiceMonitor CRD not found; disabling ServiceMonitor for this install"
+    warn "ServiceMonitor CRD not found; disabling ServiceMonitor"
     ENABLE_SERVICEMONITOR="false"
   fi
 }
 
 check_prometheusrule_support() {
-  if [[ "${ENABLE_PROMETHEUSRULE}" != "true" ]]; then
-    return 0
-  fi
-
+  [[ "${ENABLE_PROMETHEUSRULE}" == "true" ]] || return 0
   if ! kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
-    warn "PrometheusRule CRD not found; disabling PrometheusRule for this install"
+    warn "PrometheusRule CRD not found; disabling PrometheusRule"
     ENABLE_PROMETHEUSRULE="false"
   fi
 }
 
 preview_command() {
-  local rendered=()
-  local arg
+  local rendered=() arg lower
   for arg in "$@"; do
-    rendered+=("$(printf '%q' "${arg}")")
+    lower="${arg,,}"
+    if [[ "${lower}" == *"password="* || "${lower}" == *"token="* || "${lower}" == *"credential="* ]]; then
+      rendered+=("<redacted>")
+    else
+      rendered+=("$(printf '%q' "${arg}")")
+    fi
   done
   printf '%s ' "${rendered[@]}"
   echo
@@ -516,6 +522,8 @@ build_resource_profile_args() {
         --set-string "redis.resources.requests.memory=256Mi"
         --set-string "redis.resources.limits.cpu=500m"
         --set-string "redis.resources.limits.memory=512Mi"
+        --set-string "redis.runtimeConfig.maxmemory=384mb"
+        --set-string "redis.runtimeConfig.replBacklogSize=16mb"
         --set-string "metrics.resources.requests.cpu=50m"
         --set-string "metrics.resources.requests.memory=64Mi"
         --set-string "metrics.resources.limits.cpu=100m"
@@ -540,6 +548,8 @@ build_resource_profile_args() {
         --set-string "redis.resources.requests.memory=1Gi"
         --set-string "redis.resources.limits.cpu=1"
         --set-string "redis.resources.limits.memory=2Gi"
+        --set-string "redis.runtimeConfig.maxmemory=1536mb"
+        --set-string "redis.runtimeConfig.replBacklogSize=64mb"
         --set-string "metrics.resources.requests.cpu=100m"
         --set-string "metrics.resources.requests.memory=128Mi"
         --set-string "metrics.resources.limits.cpu=200m"
@@ -564,6 +574,8 @@ build_resource_profile_args() {
         --set-string "redis.resources.requests.memory=2Gi"
         --set-string "redis.resources.limits.cpu=2"
         --set-string "redis.resources.limits.memory=4Gi"
+        --set-string "redis.runtimeConfig.maxmemory=3gb"
+        --set-string "redis.runtimeConfig.replBacklogSize=128mb"
         --set-string "metrics.resources.requests.cpu=200m"
         --set-string "metrics.resources.requests.memory=256Mi"
         --set-string "metrics.resources.limits.cpu=500m"
@@ -595,14 +607,16 @@ install_release() {
   local helm_cmd=(
     helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"
     -n "${NAMESPACE}"
+    -f "${CHART_DIR}/values-archinfra.yaml"
     --create-namespace
     --wait
     --timeout "${WAIT_TIMEOUT}"
     --set "cluster.nodes=${NODES}"
     --set "cluster.replicas=${REPLICAS}"
-    --set-string "password=${REDIS_PASSWORD}"
-    --set-string "global.redis.password=${REDIS_PASSWORD}"
     --set "usePassword=true"
+    --set "usePasswordFiles=true"
+    --set-string "existingSecret=${REDIS_SECRET_NAME}"
+    --set-string "existingSecretPasswordKey=${REDIS_SECRET_KEY}"
     --set "persistence.enabled=true"
     --set-string "persistence.size=${STORAGE_SIZE}"
     --set-string "persistence.storageClass=${STORAGE_CLASS}"
@@ -631,19 +645,13 @@ install_release() {
   )
 
   helm_cmd+=("${RESOURCE_HELM_ARGS[@]}")
-
   if [[ -n "${SERVICE_MONITOR_NAMESPACE}" && "${ENABLE_SERVICEMONITOR}" == "true" ]]; then
     helm_cmd+=(--set-string "metrics.serviceMonitor.namespace=${SERVICE_MONITOR_NAMESPACE}")
   fi
+  if [[ ${#HELM_ARGS[@]} -gt 0 ]]; then helm_cmd+=("${HELM_ARGS[@]}"); fi
 
-  if [[ ${#HELM_ARGS[@]} -gt 0 ]]; then
-    helm_cmd+=("${HELM_ARGS[@]}")
-  fi
-
-  section "Helm 命令预览"
+  section "Helm 命令预览（敏感值不会出现在命令中）"
   preview_command "${helm_cmd[@]}"
-
-  ensure_namespace
   "${helm_cmd[@]}"
   success "Redis Cluster install or upgrade completed"
 }
@@ -651,16 +659,17 @@ install_release() {
 show_post_install_info() {
   section "部署结果"
   kubectl get pods,svc,pvc -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE_NAME}" || true
+  echo
+  echo "Redis auth Secret: ${NAMESPACE}/${REDIS_SECRET_NAME} (key: ${REDIS_SECRET_KEY})"
+  echo "Retrieve it only when needed with kubectl; the installer does not print credentials."
 
   if [[ "${ENABLE_SERVICEMONITOR}" == "true" ]] && kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
     echo
     kubectl get servicemonitor -n "${SERVICE_MONITOR_NAMESPACE:-${NAMESPACE}}" || true
   fi
-
   if [[ "${ENABLE_PROMETHEUSRULE}" == "true" ]] && kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
     echo
-    kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" >/dev/null 2>&1 && \
-      kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" || true
+    kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" >/dev/null 2>&1 && kubectl get prometheusrule -n "${NAMESPACE}" "${RELEASE_NAME}" || true
   fi
 }
 
@@ -671,28 +680,23 @@ uninstall_release() {
   else
     warn "Helm release ${RELEASE_NAME} not found in namespace ${NAMESPACE}"
   fi
-
   if [[ "${DELETE_PVC}" == "true" ]]; then
     kubectl delete pvc -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE_NAME}" --ignore-not-found=true
     success "PVC cleanup requested"
   fi
+  log "Authentication Secret is intentionally retained for safe reinstall/restore"
 }
 
 show_status() {
   section "Helm 状态"
   helm status "${RELEASE_NAME}" -n "${NAMESPACE}" || warn "Release ${RELEASE_NAME} not found"
-
   section "Kubernetes 资源"
   kubectl get pods,svc,pvc -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE_NAME}" || true
-
   if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
-    echo
-    kubectl get servicemonitor -A | grep "${RELEASE_NAME}" || true
+    echo; kubectl get servicemonitor -A | grep "${RELEASE_NAME}" || true
   fi
-
   if kubectl get crd prometheusrules.monitoring.coreos.com >/dev/null 2>&1; then
-    echo
-    kubectl get prometheusrule -A | grep "${RELEASE_NAME}" || true
+    echo; kubectl get prometheusrule -A | grep "${RELEASE_NAME}" || true
   fi
 }
 
@@ -710,6 +714,7 @@ main() {
       confirm
       extract_payload
       load_image_metadata
+      ensure_redis_secret
       check_servicemonitor_support
       check_prometheusrule_support
       prepare_images
@@ -725,9 +730,7 @@ main() {
       check_deps
       show_status
       ;;
-    *)
-      die "Unsupported action: ${ACTION}"
-      ;;
+    *) die "Unsupported action: ${ACTION}" ;;
   esac
 }
 

@@ -15,8 +15,70 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
+      - name: Validate fork and production contract
+        run: python3 scripts/validate-upstream-contract.py
+
+      - name: Validate image metadata
+        run: python3 -m json.tool images/image.json >/dev/null
+
+      - name: Validate installer shell and credential policy
+        run: |
+          bash -n install.sh
+          bash install.sh help > /tmp/installer-help.txt
+          grep -q -- '--existing-secret' /tmp/installer-help.txt
+          grep -q -- '--password-file' /tmp/installer-help.txt
+          grep -q -- '--registry-password-file' /tmp/installer-help.txt
+          ! grep -q 'Redis@Passw0rd' install.sh
+          ! grep -q 'REGISTRY_PASS="passw0rd"' install.sh
+          ! grep -q 'command -v jq' install.sh
+          ! grep -q -- '--set-string "password=' install.sh
+          ! grep -q -- '--set-string "global.redis.password=' install.sh
+
       - name: Helm lint
-        run: helm lint charts/redis-cluster
+        run: helm lint charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml
+
+      - name: Validate base chart render
+        run: |
+          helm template redis-cluster-base charts/redis-cluster > /tmp/render-base.yaml
+          grep -q 'maxmemory 1536mb' /tmp/render-base.yaml
+          grep -q 'cluster-node-timeout 15000' /tmp/render-base.yaml
 
       - name: Helm template render
-        run: helm template redis-cluster charts/redis-cluster > /tmp/render.yaml
+        run: helm template redis-cluster charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml > /tmp/render.yaml
+
+      - name: Assert archinfra production contract is rendered
+        run: |
+          grep -q '/opt/bitnami/scripts/redis-cluster/entrypoint.sh' /tmp/render.yaml
+          grep -q 'sealos.hub:5000/kube4/redis-cluster:8.10.1-r1' /tmp/render.yaml
+          grep -q 'sealos.hub:5000/kube4/redis-exporter:1.89.0-r1' /tmp/render.yaml
+          grep -q 'archinfra.io/redis-config-baseline: "8.10.1"' /tmp/render.yaml
+          grep -q 'include /opt/bitnami/redis/etc.default/redis.conf' /tmp/render.yaml
+          grep -q 'maxmemory 1536mb' /tmp/render.yaml
+          grep -q 'maxmemory-policy noeviction' /tmp/render.yaml
+          grep -q 'repl-backlog-size 64mb' /tmp/render.yaml
+          grep -q 'cluster-enabled yes' /tmp/render.yaml
+          grep -q 'cluster-node-timeout 15000' /tmp/render.yaml
+          grep -q 'RedisExporterDown' /tmp/render.yaml
+          grep -q 'RedisDown' /tmp/render.yaml
+          grep -q 'RedisClusterStateNotOk' /tmp/render.yaml
+          grep -q 'RedisAOFWriteFailed' /tmp/render.yaml
+          grep -q 'RedisCPUUsageHigh' /tmp/render.yaml
+          grep -q 'RedisPVCUsageCritical' /tmp/render.yaml
+          grep -q 'RedisPodOOMKilled' /tmp/render.yaml
+          grep -q 'redis-overview.json' /tmp/render.yaml
+          grep -q 'redis-performance.json' /tmp/render.yaml
+          grep -q 'Redis / Overview' /tmp/render.yaml
+          grep -q 'Redis / Performance' /tmp/render.yaml
+          grep -q 'version: 13.0.5-archinfra.1' charts/redis-cluster/Chart.yaml
+          grep -q 'appVersion: 8.10.1' charts/redis-cluster/Chart.yaml
+          ! grep -q 'bitnamilegacy/redis-cluster' images/image.json
+          ! grep -q 'bitnami/redis-cluster:' images/image.json
+
+      - name: Validate explicit full-config override contract
+        run: |
+          helm template redis-cluster charts/redis-cluster \
+            -f charts/redis-cluster/values-archinfra.yaml \
+            --set-string 'redis.defaultConfigOverride=port 6380' \
+            > /tmp/render-override.yaml
+          grep -q 'port 6380' /tmp/render-override.yaml
+          ! grep -q 'include /opt/bitnami/redis/etc.default/redis.conf' /tmp/render-override.yaml

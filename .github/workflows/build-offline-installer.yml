@@ -13,7 +13,12 @@ on:
       - "build.sh"
       - "install.sh"
       - "README.md"
+      - "VERSION"
+      - "UPSTREAM.yaml"
+      - "LICENSES/**"
       - "images/**"
+      - "runtime/**"
+      - "scripts/**"
       - "charts/**"
   pull_request:
     paths:
@@ -21,7 +26,12 @@ on:
       - "build.sh"
       - "install.sh"
       - "README.md"
+      - "VERSION"
+      - "UPSTREAM.yaml"
+      - "LICENSES/**"
       - "images/**"
+      - "runtime/**"
+      - "scripts/**"
       - "charts/**"
 
 permissions:
@@ -29,29 +39,71 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - amd64
-          - arm64
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Verify native runner architecture
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) test "$(uname -m)" = "x86_64" ;;
+            arm64) test "$(uname -m)" = "aarch64" ;;
+          esac
 
       - name: Ensure executable permissions
-        run: chmod +x build.sh install.sh
+        run: chmod +x build.sh install.sh runtime/redis-cluster/wait-for-port scripts/test-runtime-cluster-e2e.sh
+
+      - name: Validate fork metadata
+        run: python3 scripts/validate-upstream-contract.py
 
       - name: Build installer
         run: ./build.sh --arch "${{ matrix.arch }}"
+
+      - name: Validate Redis runtime contract
+        run: |
+          image="archinfra-payload/redis-cluster:8.10.1-r1-${{ matrix.arch }}"
+          docker run --rm --entrypoint /bin/bash "$image" -ec '
+            test "$(id -u)" = "1001"
+            test "$HOME" = "/"
+            test "$OS_FLAVOUR" = "debian-12"
+            test "$OS_NAME" = "linux"
+            test -x /opt/bitnami/scripts/redis-cluster/entrypoint.sh
+            test -x /opt/bitnami/scripts/redis-cluster/run.sh
+            test -x /usr/local/bin/wait-for-port
+            /opt/bitnami/redis/bin/redis-server --version | grep -F "v=8.10.1"
+            /opt/bitnami/redis/bin/redis-cli --version | grep -F "8.10.1"
+            ! ldd /opt/bitnami/redis/bin/redis-server | grep -F "not found"
+            ! ldd /opt/bitnami/redis/bin/redis-cli | grep -F "not found"
+            grep -Fq "tls-expected-peer-name" /opt/bitnami/redis/etc/redis-default.conf
+            grep -Fq "backupdirname \"backupdir\"" /opt/bitnami/redis/etc/redis-default.conf
+            grep -Eq "^cluster-enabled[[:space:]]+yes$" /opt/bitnami/redis/etc.default/redis.conf
+            password_file="$(mktemp)"
+            printf "%s" "file-secret-contract" > "$password_file"
+            export REDIS_PASSWORD_FILE="$password_file"
+            . /opt/bitnami/scripts/redis-cluster-env.sh
+            test "$REDIS_PASSWORD" = "file-secret-contract"
+            rm -f "$password_file"
+          '
+
+      - name: Run six-node Redis Cluster E2E
+        run: |
+          image="archinfra-payload/redis-cluster:8.10.1-r1-${{ matrix.arch }}"
+          ./scripts/test-runtime-cluster-e2e.sh "$image"
+
+      - name: Verify installer checksum
+        run: |
+          cd dist
+          sha256sum -c <(printf "%s  %s\n" "$(cat redis-cluster-installer-${{ matrix.arch }}.run.sha256)" "redis-cluster-installer-${{ matrix.arch }}.run")
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

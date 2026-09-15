@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ template "common.names.fullname" . }}-dashboard
+  name: {{ template "common.names.fullname" . }}-dashboards
   namespace: {{ include "common.names.namespace" . | quote }}
   labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
     {{- if .Values.metrics.dashboards.labels }}
@@ -13,225 +13,159 @@ metadata:
   annotations: {{- include "common.tplvalues.render" ( dict "value" .Values.metrics.dashboards.annotations "context" $ ) | nindent 4 }}
   {{- end }}
 data:
-  redis-overview.json: |
+  redis-overview.json: |-
     {
-      "annotations": {
-        "list": []
-      },
+      "annotations": {"list": []},
       "editable": true,
       "panels": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 0,
-            "y": 0
-          },
-          "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            }
-          },
-          "targets": [
-            {
-              "expr": "min(redis_up{service=\"{{ $redisMetricsService }}\"})",
-              "refId": "A"
-            }
-          ],
-          "title": "Exporter Up",
-          "type": "stat"
+          "type": "stat",
+          "title": "Exporter Scrape Up",
+          "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
+          "targets": [{"expr": "min(up{service=\"{{ $redisMetricsService }}\"})", "refId": "A"}],
+          "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 6,
-            "y": 0
-          },
-          "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            }
-          },
-          "targets": [
-            {
-              "expr": "sum(redis_connected_clients{service=\"{{ $redisMetricsService }}\"})",
-              "refId": "A"
-            }
-          ],
+          "type": "stat",
+          "title": "Redis Up",
+          "gridPos": {"h": 5, "w": 4, "x": 4, "y": 0},
+          "targets": [{"expr": "min(redis_up{service=\"{{ $redisMetricsService }}\"})", "refId": "A"}],
+          "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+        },
+        {
+          "type": "stat",
+          "title": "Cluster State",
+          "gridPos": {"h": 5, "w": 4, "x": 8, "y": 0},
+          "targets": [{"expr": "min(redis_cluster_state{service=\"{{ $redisMetricsService }}\"})", "refId": "A"}],
+          "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+        },
+        {
+          "type": "stat",
+          "title": "Slots Assigned",
+          "gridPos": {"h": 5, "w": 4, "x": 12, "y": 0},
+          "targets": [{"expr": "min(redis_cluster_slots_assigned{service=\"{{ $redisMetricsService }}\"})", "refId": "A"}],
+          "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+        },
+        {
+          "type": "stat",
           "title": "Connected Clients",
-          "type": "stat"
+          "gridPos": {"h": 5, "w": 4, "x": 16, "y": 0},
+          "targets": [{"expr": "sum(redis_connected_clients{service=\"{{ $redisMetricsService }}\"})", "refId": "A"}],
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 12,
-            "y": 0
-          },
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "center",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            }
-          },
-          "targets": [
-            {
-              "expr": "sum(redis_memory_used_bytes{service=\"{{ $redisMetricsService }}\"})",
-              "refId": "A"
-            }
-          ],
-          "title": "Memory Used",
           "type": "stat",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "bytes"
-            },
-            "overrides": []
-          }
+          "title": "Peak Memory %",
+          "gridPos": {"h": 5, "w": 4, "x": 20, "y": 0},
+          "targets": [{"expr": "max(redis_memory_used_bytes{service=\"{{ $redisMetricsService }}\"} / clamp_min(redis_memory_max_bytes{service=\"{{ $redisMetricsService }}\"}, 1)) * 100", "refId": "A"}],
+          "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+          "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 18,
-            "y": 0
-          },
-          "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            }
-          },
-          "targets": [
-            {
-              "expr": "(sum(rate(redis_keyspace_hits_total{service=\"{{ $redisMetricsService }}\"}[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total{service=\"{{ $redisMetricsService }}\"}[5m])) + sum(rate(redis_keyspace_misses_total{service=\"{{ $redisMetricsService }}\"}[5m])), 1)) * 100",
-              "refId": "A"
-            }
-          ],
-          "title": "Cache Hit Ratio",
-          "type": "stat",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent"
-            },
-            "overrides": []
-          }
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 5
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(redis_commands_processed_total{service=\"{{ $redisMetricsService }}\"}[5m]))",
-              "legendFormat": "commands/s",
-              "refId": "A"
-            }
-          ],
-          "title": "Command Throughput",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 5
-          },
-          "targets": [
-            {
-              "expr": "sum(redis_memory_used_bytes{service=\"{{ $redisMetricsService }}\"})",
-              "legendFormat": "used",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(redis_memory_max_bytes{service=\"{{ $redisMetricsService }}\"})",
-              "legendFormat": "max",
-              "refId": "B"
-            }
-          ],
-          "title": "Memory Usage",
           "type": "timeseries",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "bytes"
-            },
-            "overrides": []
-          }
+          "title": "Command Throughput",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+          "targets": [{"expr": "sum by(instance) (rate(redis_commands_processed_total{service=\"{{ $redisMetricsService }}\"}[5m]))", "legendFormat": "{{ "{{instance}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Memory Used / Max",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+          "targets": [
+            {"expr": "redis_memory_used_bytes{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "used {{ "{{instance}}" }}", "refId": "A"},
+            {"expr": "redis_memory_max_bytes{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "max {{ "{{instance}}" }}", "refId": "B"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Replication Lag",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "targets": [{"expr": "redis_connected_slave_lag_seconds{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "{{ "{{instance}}" }} -> {{ "{{slave_ip}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "PVC Usage %",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+          "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+          "targets": [{"expr": "kubelet_volume_stats_used_bytes{namespace=\"{{ include "common.names.namespace" . }}\",persistentvolumeclaim=~\"redis-data-{{ template "common.names.fullname" . }}-.*\"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace=\"{{ include "common.names.namespace" . }}\",persistentvolumeclaim=~\"redis-data-{{ template "common.names.fullname" . }}-.*\"}, 1) * 100", "legendFormat": "{{ "{{persistentvolumeclaim}}" }}", "refId": "A"}]
         }
       ],
       "schemaVersion": 39,
-      "style": "dark",
-      "tags": [
-        "archinfra",
-        "redis"
+      "tags": ["archinfra", "redis", "overview"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "title": "Redis / Overview",
+      "version": 2
+    }
+  redis-performance.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Commands / sec by Instance",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "sum by(instance) (rate(redis_commands_total{service=\"{{ $redisMetricsService }}\"}[5m]))", "legendFormat": "{{ "{{instance}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Average Command Latency",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "targets": [{"expr": "sum by(cmd) (rate(redis_commands_duration_seconds_total{service=\"{{ $redisMetricsService }}\"}[5m])) / clamp_min(sum by(cmd) (rate(redis_commands_total{service=\"{{ $redisMetricsService }}\"}[5m])), 0.001)", "legendFormat": "{{ "{{cmd}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Redis CPU Cores",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [{"expr": "rate(redis_cpu_sys_seconds_total{service=\"{{ $redisMetricsService }}\"}[5m]) + rate(redis_cpu_user_seconds_total{service=\"{{ $redisMetricsService }}\"}[5m])", "legendFormat": "{{ "{{instance}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Clients",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {"expr": "redis_connected_clients{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "connected {{ "{{instance}}" }}", "refId": "A"},
+            {"expr": "redis_blocked_clients{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "blocked {{ "{{instance}}" }}", "refId": "B"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Cache Hit Ratio %",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+          "targets": [{"expr": "sum(rate(redis_keyspace_hits_total{service=\"{{ $redisMetricsService }}\"}[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total{service=\"{{ $redisMetricsService }}\"}[5m])) + sum(rate(redis_keyspace_misses_total{service=\"{{ $redisMetricsService }}\"}[5m])), 1) * 100", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Memory Fragmentation Ratio",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "targets": [{"expr": "redis_mem_fragmentation_ratio{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "{{ "{{instance}}" }}", "refId": "A"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Evictions / Rejected Connections",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "targets": [
+            {"expr": "sum(rate(redis_evicted_keys_total{service=\"{{ $redisMetricsService }}\"}[5m]))", "legendFormat": "evictions/s", "refId": "A"},
+            {"expr": "sum(rate(redis_rejected_connections_total{service=\"{{ $redisMetricsService }}\"}[5m]))", "legendFormat": "rejected/s", "refId": "B"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Connected Replicas",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "targets": [{"expr": "redis_connected_slaves{service=\"{{ $redisMetricsService }}\"}", "legendFormat": "{{ "{{instance}}" }}", "refId": "A"}]
+        }
       ],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-6h",
-        "to": "now"
-      },
-      "title": "Redis Cluster Overview",
-      "version": 1
+      "schemaVersion": 39,
+      "tags": ["archinfra", "redis", "performance"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "title": "Redis / Performance",
+      "version": 2
     }
 {{- end }}

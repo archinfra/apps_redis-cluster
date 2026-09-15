@@ -50,6 +50,11 @@ usage() {
 Usage:
   ./build.sh [--arch amd64|arm64|all]
 
+Image entries in images/image.json support either:
+  "pull": "registry/image:tag"       Pull an upstream image
+or:
+  "build": "runtime/context"         Build an archinfra-owned image
+
 Examples:
   ./build.sh --arch amd64
   ./build.sh --arch arm64
@@ -98,8 +103,8 @@ parse_args() {
 }
 
 check_requirements() {
-  command -v jq >/dev/null 2>&1 || die "jq is required"
-  command -v docker >/dev/null 2>&1 || die "docker is required"
+  command -v jq >/dev/null 2>&1 || die "jq is required on the build host"
+  command -v docker >/dev/null 2>&1 || die "docker is required on the build host"
   [[ -f "${INSTALLER_TEMPLATE}" ]] || die "install.sh is missing"
   [[ -f "${IMAGE_JSON}" ]] || die "images/image.json is missing"
   [[ -d "${ROOT_DIR}/charts/redis-cluster" ]] || die "charts/redis-cluster is missing"
@@ -134,19 +139,30 @@ prepare_images() {
   while IFS= read -r item; do
     [[ -n "${item}" ]] || continue
 
-    local pull default_target_ref tar_name load_ref item_platform
-    pull="$(jq -r '.pull' <<<"${item}")"
+    local pull build_context default_target_ref tar_name load_ref item_platform
+    pull="$(jq -r '.pull // empty' <<<"${item}")"
+    build_context="$(jq -r '.build // empty' <<<"${item}")"
     default_target_ref="$(jq -r '.tag' <<<"${item}")"
     tar_name="$(jq -r '.tar' <<<"${item}")"
     item_platform="$(jq -r '.platform // empty' <<<"${item}")"
     [[ -n "${item_platform}" ]] || item_platform="${platform}"
     load_ref="$(build_local_load_ref "${default_target_ref}")"
 
-    log "Pulling ${pull} for ${item_platform}"
-    docker pull --platform "${item_platform}" "${pull}"
-
-    log "Tagging ${pull} -> ${load_ref}"
-    docker tag "${pull}" "${load_ref}"
+    if [[ -n "${build_context}" && -n "${pull}" ]]; then
+      die "Image entry must use exactly one of pull/build: ${item}"
+    elif [[ -n "${build_context}" ]]; then
+      [[ -d "${ROOT_DIR}/${build_context}" ]] || die "Missing image build context: ${build_context}"
+      [[ -f "${ROOT_DIR}/${build_context}/Dockerfile" ]] || die "Missing Dockerfile: ${build_context}/Dockerfile"
+      log "Building ${default_target_ref} from ${build_context} for ${item_platform}"
+      docker build --pull --platform "${item_platform}" -t "${load_ref}" "${ROOT_DIR}/${build_context}"
+    elif [[ -n "${pull}" ]]; then
+      log "Pulling ${pull} for ${item_platform}"
+      docker pull --platform "${item_platform}" "${pull}"
+      log "Tagging ${pull} -> ${load_ref}"
+      docker tag "${pull}" "${load_ref}"
+    else
+      die "Image entry is missing pull/build source: ${item}"
+    fi
 
     log "Saving ${load_ref} -> ${PAYLOAD_DIR}/images/${tar_name}"
     docker save -o "${PAYLOAD_DIR}/images/${tar_name}" "${load_ref}"
@@ -176,6 +192,7 @@ package_payload() {
   chmod +x "${installer_path}"
 
   sha256sum "${installer_path}" | awk '{print $1}' > "${checksum_path}"
+  sha256sum -c <(printf '%s  %s\n' "$(cat "${checksum_path}")" "${installer_path}") >/dev/null
   success "Generated $(basename "${installer_path}")"
 }
 
