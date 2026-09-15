@@ -15,6 +15,7 @@ on:
       - "README.md"
       - "VERSION"
       - "UPSTREAM.yaml"
+      - "LICENSES/**"
       - "images/**"
       - "runtime/**"
       - "scripts/**"
@@ -27,6 +28,7 @@ on:
       - "README.md"
       - "VERSION"
       - "UPSTREAM.yaml"
+      - "LICENSES/**"
       - "images/**"
       - "runtime/**"
       - "scripts/**"
@@ -37,26 +39,29 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - amd64
-          - arm64
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Verify native runner architecture
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) test "$(uname -m)" = "x86_64" ;;
+            arm64) test "$(uname -m)" = "aarch64" ;;
+          esac
 
       - name: Ensure executable permissions
-        run: chmod +x build.sh install.sh
+        run: chmod +x build.sh install.sh runtime/redis-cluster/wait-for-port
 
       - name: Validate fork metadata
         run: python3 scripts/validate-upstream-contract.py
@@ -67,9 +72,10 @@ jobs:
       - name: Validate Redis runtime contract
         run: |
           image="archinfra-payload/redis-cluster:8.10.1-r1-${{ matrix.arch }}"
-          docker run --rm --platform "linux/${{ matrix.arch }}" --entrypoint /bin/bash "$image" -ec '
+          docker run --rm --entrypoint /bin/bash "$image" -ec '
             test -x /opt/bitnami/scripts/redis-cluster/entrypoint.sh
             test -x /opt/bitnami/scripts/redis-cluster/run.sh
+            test -x /usr/local/bin/wait-for-port
             /opt/bitnami/redis/bin/redis-server --version | grep -F "v=8.10.1"
           '
 
