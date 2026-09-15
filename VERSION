@@ -3,6 +3,10 @@ component: redis-cluster
 distribution:
   version: 13.0.5-archinfra.1
 
+installer:
+  version: 0.1.7
+  auth: kubernetes-secret-file
+
 redis:
   version: 8.10.1
   runtimeRevision: r1
@@ -15,6 +19,11 @@ chart:
 redisExporter:
   version: 1.89.0
   runtimeRevision: r1
+
+monitoring:
+  schema: v2
+  dashboards: 2
+  sourceOfTruth: charts/redis-cluster/values-archinfra.yaml
 
 helper:
   image: busybox
