@@ -25,7 +25,8 @@ data:
   # Do not vendor a full redis.conf in the chart. The runtime image embeds the
   # exact redis.conf from the same pinned Redis source commit as redis-server.
   # This small file is the archinfra overlay plus the mutable keys required by
-  # the compatibility scripts.
+  # the compatibility scripts. dig() keeps the fork usable with the base
+  # values.yaml alone while values-archinfra.yaml supplies production defaults.
   redis-default.conf: |-
     include /opt/bitnami/redis/etc.default/redis.conf
 
@@ -33,16 +34,16 @@ data:
     bind 127.0.0.1 -::1
     protected-mode yes
     port 6379
-    tcp-keepalive {{ default 300 .Values.redis.runtimeConfig.tcpKeepalive }}
+    tcp-keepalive {{ dig "runtimeConfig" "tcpKeepalive" 300 .Values.redis }}
     # requirepass archinfra-placeholder
     # masterauth archinfra-placeholder
     # aclfile /opt/bitnami/redis/etc/users.acl
 
     # Capacity guardrails. Keep maxmemory below the pod cgroup limit so Redis
     # has headroom for allocator overhead, replication/client buffers and fork COW.
-    maxmemory {{ default "1536mb" .Values.redis.runtimeConfig.maxmemory }}
-    maxmemory-policy {{ default "noeviction" .Values.redis.runtimeConfig.maxmemoryPolicy }}
-    maxclients {{ default 10000 .Values.redis.runtimeConfig.maxclients }}
+    maxmemory {{ dig "runtimeConfig" "maxmemory" "1536mb" .Values.redis }}
+    maxmemory-policy {{ dig "runtimeConfig" "maxmemoryPolicy" "noeviction" .Values.redis }}
+    maxclients {{ dig "runtimeConfig" "maxclients" 10000 .Values.redis }}
 
     # Runtime paths and persistence keys mutated by postunpack/setup.
     daemonize no
@@ -50,14 +51,14 @@ data:
     logfile ""
     dir /bitnami/redis/data
     appendonly no
-    appendfsync {{ default "everysec" .Values.redis.runtimeConfig.appendfsync }}
-    auto-aof-rewrite-percentage {{ default 100 .Values.redis.runtimeConfig.autoAofRewritePercentage }}
-    auto-aof-rewrite-min-size {{ default "64mb" .Values.redis.runtimeConfig.autoAofRewriteMinSize }}
+    appendfsync {{ dig "runtimeConfig" "appendfsync" "everysec" .Values.redis }}
+    auto-aof-rewrite-percentage {{ dig "runtimeConfig" "autoAofRewritePercentage" 100 .Values.redis }}
+    auto-aof-rewrite-min-size {{ dig "runtimeConfig" "autoAofRewriteMinSize" "64mb" .Values.redis }}
 
     # Replication and observability defaults.
-    repl-backlog-size {{ default "64mb" .Values.redis.runtimeConfig.replBacklogSize }}
-    slowlog-log-slower-than {{ default 10000 .Values.redis.runtimeConfig.slowlogLogSlowerThan }}
-    slowlog-max-len {{ default 256 .Values.redis.runtimeConfig.slowlogMaxLen }}
+    repl-backlog-size {{ dig "runtimeConfig" "replBacklogSize" "64mb" .Values.redis }}
+    slowlog-log-slower-than {{ dig "runtimeConfig" "slowlogLogSlowerThan" 10000 .Values.redis }}
+    slowlog-max-len {{ dig "runtimeConfig" "slowlogMaxLen" 256 .Values.redis }}
 
     # TLS keys are intentionally present as commented placeholders so
     # redis_conf_set can safely activate them without carrying a second full
@@ -80,7 +81,7 @@ data:
     # Redis Cluster settings mutated by librediscluster.sh.
     cluster-enabled yes
     cluster-config-file /bitnami/redis/data/nodes.conf
-    cluster-node-timeout {{ default 15000 .Values.redis.runtimeConfig.clusterNodeTimeout }}
+    cluster-node-timeout {{ dig "runtimeConfig" "clusterNodeTimeout" 15000 .Values.redis }}
     # cluster-announce-ip 127.0.0.1
     # cluster-announce-hostname localhost
     # cluster-announce-port 6379
