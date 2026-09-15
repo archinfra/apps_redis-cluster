@@ -91,6 +91,8 @@ metrics:
     enabled: true
     additionalLabels:
       monitoring.archinfra.io/stack: default
+    # Keep Prometheus interpolation out of annotations because this list is
+    # rendered through Helm tpl. Alert labels still retain instance/pod/PVC data.
     rules:
       - alert: RedisExporterDown
         expr: up{service="{{ template "common.names.fullname" . }}-metrics"} == 0
@@ -100,7 +102,7 @@ metrics:
           category: availability
         annotations:
           summary: Redis exporter unavailable
-          description: Prometheus cannot scrape the Redis exporter for {{ template "common.names.fullname" . }} for more than 2 minutes.
+          description: Prometheus cannot scrape the Redis exporter for more than 2 minutes.
       - alert: RedisDown
         expr: redis_up{service="{{ template "common.names.fullname" . }}-metrics"} == 0
         for: 2m
@@ -109,7 +111,7 @@ metrics:
           category: availability
         annotations:
           summary: Redis instance unavailable
-          description: The exporter is reachable but cannot connect to Redis on {{ "{{ $labels.instance }}" }}.
+          description: The exporter is reachable but cannot connect to its Redis instance.
       - alert: RedisClusterStateNotOk
         expr: redis_cluster_state{service="{{ template "common.names.fullname" . }}-metrics"} == 0
         for: 2m
@@ -118,7 +120,7 @@ metrics:
           category: cluster
         annotations:
           summary: Redis Cluster state is not OK
-          description: Redis Cluster reports cluster_state != ok on {{ "{{ $labels.instance }}" }}.
+          description: A Redis node reports cluster_state different from ok.
       - alert: RedisClusterSlotsIncomplete
         expr: redis_cluster_slots_assigned{service="{{ template "common.names.fullname" . }}-metrics"} < 16384
         for: 2m
@@ -127,7 +129,7 @@ metrics:
           category: cluster
         annotations:
           summary: Redis Cluster slots are incomplete
-          description: Fewer than 16384 hash slots are assigned on {{ "{{ $labels.instance }}" }}.
+          description: Fewer than 16384 hash slots are assigned.
       - alert: RedisClusterSlotsFail
         expr: redis_cluster_slots_fail{service="{{ template "common.names.fullname" . }}-metrics"} > 0
         for: 2m
@@ -136,7 +138,7 @@ metrics:
           category: cluster
         annotations:
           summary: Redis Cluster has FAIL slots
-          description: Redis Cluster reports failed hash slots on {{ "{{ $labels.instance }}" }}.
+          description: Redis Cluster reports one or more failed hash slots.
       - alert: RedisClusterSlotsPfail
         expr: redis_cluster_slots_pfail{service="{{ template "common.names.fullname" . }}-metrics"} > 0
         for: 5m
@@ -145,7 +147,7 @@ metrics:
           category: cluster
         annotations:
           summary: Redis Cluster has PFAIL slots
-          description: Redis Cluster reports potentially failed hash slots on {{ "{{ $labels.instance }}" }}.
+          description: Redis Cluster reports one or more potentially failed hash slots.
       - alert: RedisReplicaMissing
         expr: |
           (redis_connected_slaves{service="{{ template "common.names.fullname" . }}-metrics"} < {{ .Values.cluster.replicas }})
@@ -166,7 +168,7 @@ metrics:
           category: replication
         annotations:
           summary: Redis replication lag is high
-          description: Replica {{ "{{ $labels.slave_ip }}" }}:{{ "{{ $labels.slave_port }}" }} is more than 10 seconds behind.
+          description: A connected replica is more than 10 seconds behind its master.
       - alert: RedisMemoryUsageHigh
         expr: |
           redis_memory_used_bytes{service="{{ template "common.names.fullname" . }}-metrics"}
@@ -178,7 +180,7 @@ metrics:
           category: capacity
         annotations:
           summary: Redis memory usage above 80%
-          description: Redis memory usage is above 80% of maxmemory on {{ "{{ $labels.instance }}" }}.
+          description: Redis memory usage is above 80 percent of maxmemory.
       - alert: RedisMemoryUsageCritical
         expr: |
           redis_memory_used_bytes{service="{{ template "common.names.fullname" . }}-metrics"}
@@ -190,7 +192,7 @@ metrics:
           category: capacity
         annotations:
           summary: Redis memory usage above 90%
-          description: Redis memory usage is above 90% of maxmemory on {{ "{{ $labels.instance }}" }}.
+          description: Redis memory usage is above 90 percent of maxmemory.
       - alert: RedisMemoryFragmentationHigh
         expr: redis_mem_fragmentation_ratio{service="{{ template "common.names.fullname" . }}-metrics"} > 1.5 and redis_memory_used_bytes{service="{{ template "common.names.fullname" . }}-metrics"} > 268435456
         for: 15m
@@ -199,7 +201,7 @@ metrics:
           category: capacity
         annotations:
           summary: Redis memory fragmentation is high
-          description: Redis memory fragmentation ratio is above 1.5 on {{ "{{ $labels.instance }}" }}.
+          description: Redis memory fragmentation ratio remains above 1.5 with a non-trivial dataset.
       - alert: RedisEvictionsDetected
         expr: increase(redis_evicted_keys_total{service="{{ template "common.names.fullname" . }}-metrics"}[5m]) > 0
         for: 1m
@@ -208,7 +210,7 @@ metrics:
           category: capacity
         annotations:
           summary: Redis is evicting keys
-          description: Redis evicted keys during the last 5 minutes on {{ "{{ $labels.instance }}" }}.
+          description: Redis evicted one or more keys during the last 5 minutes.
       - alert: RedisConnectionUtilizationHigh
         expr: redis_connected_clients{service="{{ template "common.names.fullname" . }}-metrics"} / clamp_min(redis_max_clients{service="{{ template "common.names.fullname" . }}-metrics"}, 1) > 0.80
         for: 10m
@@ -217,7 +219,7 @@ metrics:
           category: saturation
         annotations:
           summary: Redis client connection utilization is high
-          description: Redis is using more than 80% of maxclients on {{ "{{ $labels.instance }}" }}.
+          description: Redis is using more than 80 percent of maxclients.
       - alert: RedisRejectedConnections
         expr: increase(redis_rejected_connections_total{service="{{ template "common.names.fullname" . }}-metrics"}[5m]) > 0
         for: 1m
@@ -226,7 +228,7 @@ metrics:
           category: saturation
         annotations:
           summary: Redis rejected client connections
-          description: Redis rejected client connections during the last 5 minutes on {{ "{{ $labels.instance }}" }}.
+          description: Redis rejected one or more client connections during the last 5 minutes.
       - alert: RedisBlockedClientsHigh
         expr: redis_blocked_clients{service="{{ template "common.names.fullname" . }}-metrics"} > 5
         for: 10m
@@ -235,7 +237,7 @@ metrics:
           category: saturation
         annotations:
           summary: Redis has many blocked clients
-          description: More than five clients have remained blocked for 10 minutes on {{ "{{ $labels.instance }}" }}.
+          description: More than five clients have remained blocked for 10 minutes.
       - alert: RedisAOFRewriteFailed
         expr: redis_aof_last_bgrewrite_status{service="{{ template "common.names.fullname" . }}-metrics"} == 0
         for: 5m
@@ -244,7 +246,16 @@ metrics:
           category: persistence
         annotations:
           summary: Redis AOF rewrite failed
-          description: The most recent AOF background rewrite failed on {{ "{{ $labels.instance }}" }}.
+          description: The most recent AOF background rewrite failed.
+      - alert: RedisAOFWriteFailed
+        expr: redis_aof_last_write_status{service="{{ template "common.names.fullname" . }}-metrics"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: persistence
+        annotations:
+          summary: Redis AOF write failed
+          description: Redis reports that the most recent AOF write failed.
       - alert: RedisRDBSaveFailed
         expr: redis_rdb_last_bgsave_status{service="{{ template "common.names.fullname" . }}-metrics"} == 0
         for: 5m
@@ -253,7 +264,7 @@ metrics:
           category: persistence
         annotations:
           summary: Redis RDB background save failed
-          description: The most recent RDB background save failed on {{ "{{ $labels.instance }}" }}.
+          description: The most recent RDB background save failed.
       - alert: RedisCommandLatencyHigh
         expr: |
           sum by(instance) (rate(redis_commands_duration_seconds_total{service="{{ template "common.names.fullname" . }}-metrics"}[5m]))
@@ -264,7 +275,18 @@ metrics:
           category: latency
         annotations:
           summary: Redis average command latency is high
-          description: Average Redis command execution latency is above 10ms for 10 minutes on {{ "{{ $labels.instance }}" }}.
+          description: Average Redis command execution latency is above 10ms for 10 minutes.
+      - alert: RedisCPUUsageHigh
+        expr: |
+          sum by(namespace, pod) (rate(container_cpu_usage_seconds_total{namespace="{{ include "common.names.namespace" . }}",pod=~"{{ template "common.names.fullname" . }}-[0-9]+",container="{{ template "common.names.fullname" . }}"}[5m]))
+          / clamp_min(sum by(namespace, pod) (kube_pod_container_resource_limits{namespace="{{ include "common.names.namespace" . }}",pod=~"{{ template "common.names.fullname" . }}-[0-9]+",container="{{ template "common.names.fullname" . }}",resource="cpu",unit="core"}), 0.001) > 0.90
+        for: 15m
+        labels:
+          severity: warning
+          category: saturation
+        annotations:
+          summary: Redis CPU usage is high
+          description: Redis container CPU usage is above 90 percent of its configured limit for 15 minutes.
       - alert: RedisPVCUsageHigh
         expr: kubelet_volume_stats_used_bytes{namespace="{{ include "common.names.namespace" . }}",persistentvolumeclaim=~"redis-data-{{ template "common.names.fullname" . }}-.*"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace="{{ include "common.names.namespace" . }}",persistentvolumeclaim=~"redis-data-{{ template "common.names.fullname" . }}-.*"}, 1) > 0.80
         for: 15m
@@ -273,7 +295,7 @@ metrics:
           category: storage
         annotations:
           summary: Redis PVC usage above 80%
-          description: Redis PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is above 80% usage.
+          description: A Redis data PVC is above 80 percent usage.
       - alert: RedisPVCUsageCritical
         expr: kubelet_volume_stats_used_bytes{namespace="{{ include "common.names.namespace" . }}",persistentvolumeclaim=~"redis-data-{{ template "common.names.fullname" . }}-.*"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace="{{ include "common.names.namespace" . }}",persistentvolumeclaim=~"redis-data-{{ template "common.names.fullname" . }}-.*"}, 1) > 0.90
         for: 10m
@@ -282,7 +304,7 @@ metrics:
           category: storage
         annotations:
           summary: Redis PVC usage above 90%
-          description: Redis PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is above 90% usage.
+          description: A Redis data PVC is above 90 percent usage.
       - alert: RedisPodRestarting
         expr: increase(kube_pod_container_status_restarts_total{namespace="{{ include "common.names.namespace" . }}",pod=~"{{ template "common.names.fullname" . }}-[0-9]+"}[15m]) > 2
         for: 5m
@@ -291,7 +313,7 @@ metrics:
           category: kubernetes
         annotations:
           summary: Redis pod is restarting repeatedly
-          description: Redis pod {{ "{{ $labels.pod }}" }} restarted more than twice during the last 15 minutes.
+          description: A Redis pod restarted more than twice during the last 15 minutes.
       - alert: RedisPodOOMKilled
         expr: kube_pod_container_status_last_terminated_reason{namespace="{{ include "common.names.namespace" . }}",pod=~"{{ template "common.names.fullname" . }}-[0-9]+",reason="OOMKilled"} == 1
         for: 1m
@@ -300,7 +322,7 @@ metrics:
           category: kubernetes
         annotations:
           summary: Redis pod was OOMKilled
-          description: Redis pod {{ "{{ $labels.pod }}" }} was terminated because of an out-of-memory condition.
+          description: A Redis pod was terminated because of an out-of-memory condition.
   dashboards:
     enabled: true
     labels:
