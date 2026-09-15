@@ -22,14 +22,16 @@ jobs:
         run: python3 -m json.tool images/image.json >/dev/null
 
       - name: Helm lint
-        run: helm lint charts/redis-cluster
+        run: helm lint charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml
 
       - name: Helm template render
-        run: helm template redis-cluster charts/redis-cluster > /tmp/render.yaml
+        run: helm template redis-cluster charts/redis-cluster -f charts/redis-cluster/values-archinfra.yaml > /tmp/render.yaml
 
-      - name: Assert transitional runtime contract is rendered
+      - name: Assert archinfra production contract is rendered
         run: |
           grep -q '/opt/bitnami/scripts/redis-cluster/entrypoint.sh' /tmp/render.yaml
+          grep -q 'sealos.hub:5000/kube4/redis-cluster:8.10.1-r1' /tmp/render.yaml
+          grep -q 'sealos.hub:5000/kube4/redis-exporter:1.89.0-r1' /tmp/render.yaml
           grep -q 'version: 13.0.5-archinfra.1' charts/redis-cluster/Chart.yaml
           grep -q 'appVersion: 8.10.1' charts/redis-cluster/Chart.yaml
           ! grep -q 'bitnamilegacy/redis-cluster' images/image.json
